@@ -49,6 +49,8 @@ pip3 install ndi-python
 
 ## Usage
 
+🎯 **For Studio Setup**: See [STUDIO_SETUP.md](STUDIO_SETUP.md) for complete instructions.
+
 ### LED Test Patterns
 ```bash
 python3 led_test_pattern.py
@@ -60,27 +62,24 @@ python3 led_test_pattern.py
 - **P**: Cycle LED screen positions
 - **R**: Cycle rotation angles
 
-### NDI Streaming
+### NDI Receiver (Main Application)
 ```bash
-# Start NDI sender
-python3 ndi_sender.py
-
-# Start NDI receiver
-python3 ndi_receiver.py
+python3 ndi_receiver_native_display.py
 ```
+
+Receives 320x320 video from NDI source "catatumbo_led" and displays on LED screen.
 
 ## Project Structure
 
 ```
 RpiSimpleNDI/
-├── README.md                 # This file
-├── led_test_pattern.py       # LED screen test pattern generator
-├── ndi_sender.py            # NDI video sender
-├── ndi_receiver.py          # NDI video receiver
-├── requirements.txt         # Python dependencies
-└── docs/                   # Documentation
-    ├── led_test_guide.md   # LED testing guide
-    └── ndi_setup.md        # NDI setup instructions
+├── README.md                          # This file
+├── STUDIO_SETUP.md                    # Quick setup guide for studio
+├── led_test_pattern.py                # LED screen test pattern generator
+├── ndi_receiver_native_display.py     # Main NDI receiver application
+├── requirements.txt                   # Python dependencies
+├── venv/                              # Virtual environment
+└── docs/                              # Additional documentation
 ```
 
 ## Contributing

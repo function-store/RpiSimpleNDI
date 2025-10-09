@@ -60,3 +60,4 @@ Use the P key to cycle through different positions on the 800x800 display.
 
 ### Display Not Working
 The script automatically handles video driver selection. Check HDMI connection and power.
+
