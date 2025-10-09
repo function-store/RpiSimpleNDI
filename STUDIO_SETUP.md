@@ -26,15 +26,29 @@ python3 led_test_pattern.py
 - Press ESC to exit
 
 ### 3. Run NDI Receiver
+
+**Main Receiver** (60 FPS - optimized!):
 ```bash
+# Set CPU to max speed (recommended)
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+
+# Run receiver
 python3 ndi_receiver_native_display.py
+```
+
+Or with priority boost:
+```bash
+sudo nice -n -10 python3 ndi_receiver_native_display.py
 ```
 
 **What it does:**
 - Searches for NDI sources (looks for "catatumbo_led" first)
-- Displays live video on the LED screen
-- Shows FPS overlay on screen and in terminal
+- Displays live video on the LED screen at 60 FPS
+- Shows FPS in terminal and source framerate
+- Uses BGRA format (no color conversion overhead)
 - Press ESC or Ctrl+C to exit
+
+💡 **Achieved 60 FPS** using BGRA direct format (no UYVY conversion)!
 
 ## LED Screen Configuration
 
@@ -103,5 +117,6 @@ ffmpeg -f libndi_newtek -find_sources 1 -i dummy -t 1 -f null -
 ---
 
 **Last Updated**: October 10, 2025  
-**Tested**: NDI reception confirmed, display tested on home LCD (9fps before optimization)
+**Performance**: 60 FPS achieved using BGRA direct format (wired connection)  
+**Tested**: NDI reception confirmed at 60 FPS on home setup
 
