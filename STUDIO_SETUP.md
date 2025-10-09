@@ -90,7 +90,15 @@ python3 -c "import ctypes; print(ctypes.CDLL('/usr/local/lib/libndi.so.6'))"
 
 # Check display devices
 ls -la /dev/dri/card*
+
+# Test FFmpeg NDI support (if installed)
+ffmpeg -f libndi_newtek -find_sources 1 -i dummy -t 1 -f null -
 ```
+
+## Additional Documentation
+
+- **[FFMPEG_NDI_BUILD.md](FFMPEG_NDI_BUILD.md)** - Complete guide for building FFmpeg with NDI support
+- **[README.md](README.md)** - Full project documentation
 
 ---
 

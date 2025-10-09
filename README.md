@@ -26,25 +26,45 @@ This repository contains tools and utilities for Raspberry Pi projects, includin
 
 ## Requirements
 
-- Raspberry Pi (tested on Raspberry Pi OS)
-- Python 3
+- Raspberry Pi 5 (tested on Raspberry Pi OS Bookworm/Trixie)
+- Python 3.13+
 - Pygame library
+- NDI SDK (installed at `/usr/local/lib/libndi.so.6`)
+- FFmpeg with NDI support (optional, see [FFMPEG_NDI_BUILD.md](FFMPEG_NDI_BUILD.md))
 - HDMI display or LED screen
 - Network connectivity (for NDI features)
 
 ## Installation
+
+### Quick Setup (NDI SDK Already Installed)
 
 ```bash
 # Clone the repository
 git clone <repository-url>
 cd RpiSimpleNDI
 
-# Install dependencies
-sudo apt update
-sudo apt install python3-pygame python3-pip
+# Install Python dependencies
+pip3 install -r requirements.txt
+```
 
-# Install additional NDI dependencies (if needed)
-pip3 install ndi-python
+### Full Setup (From Scratch)
+
+```bash
+# 1. Install system dependencies
+sudo apt update
+sudo apt install python3-pygame python3-pip python3-numpy
+
+# 2. Install NDI SDK
+# Download from: https://ndi.video/for-developers/ndi-sdk/download/
+# Then:
+sudo cp libndi.so.6.* /usr/local/lib/
+sudo ldconfig
+
+# 3. (Optional) Build FFmpeg with NDI support
+# See FFMPEG_NDI_BUILD.md for complete instructions
+
+# 4. Install Python dependencies
+pip3 install -r requirements.txt
 ```
 
 ## Usage
@@ -75,6 +95,7 @@ Receives 320x320 video from NDI source "catatumbo_led" and displays on LED scree
 RpiSimpleNDI/
 ├── README.md                          # This file
 ├── STUDIO_SETUP.md                    # Quick setup guide for studio
+├── FFMPEG_NDI_BUILD.md                # Guide for building FFmpeg with NDI
 ├── led_test_pattern.py                # LED screen test pattern generator
 ├── ndi_receiver_native_display.py     # Main NDI receiver application
 ├── requirements.txt                   # Python dependencies
