@@ -13,12 +13,21 @@ This repository contains tools and utilities for Raspberry Pi projects, includin
 ## Features
 
 ### 🎯 Smart NDI Receiver
-- **Auto-discovery**: Automatically finds and connects to NDI sources ending with `_led`
+- **Auto-discovery**: Automatically finds and connects to NDI sources matching regex patterns
 - **Intelligent switching**: Switches to newly appeared sources automatically
 - **Smart fallback**: Falls back to previous source when current source dies
 - **Dead source detection**: Detects and recovers from non-responsive sources
+- **Manual override**: Web interface for remote source selection and control
 - **60 FPS performance**: Direct BGRA format for maximum throughput
 - **Flexible configuration**: JSON-based config for display, content, and NDI settings
+
+### 🌐 Web Interface
+- **Remote control**: Select NDI sources from any device on the network
+- **Real-time monitoring**: Live FPS, resolution, and connection status
+- **Source management**: View available sources and switch between them instantly
+- **Smart override logic**: Manual selection respects new/reappearing sources
+- **WebSocket updates**: Automatic state synchronization across all clients
+- **Mobile-friendly**: Responsive design works on phones, tablets, and desktops
 
 ### 📺 Advanced Display Management
 - **Dual resolution support**: Separate display and content resolutions
@@ -40,9 +49,10 @@ This repository contains tools and utilities for Raspberry Pi projects, includin
 - Python 3.13+
 - Pygame library
 - NDI SDK (installed at `/usr/local/lib/libndi.so.6`)
+- WebSockets library (`websockets>=10.0` for web interface)
 - FFmpeg with NDI support (optional, see [FFMPEG_NDI_BUILD.md](FFMPEG_NDI_BUILD.md))
 - HDMI display or LED screen
-- Network connectivity (for NDI features)
+- Network connectivity (for NDI and web interface)
 
 ## Installation
 
@@ -88,6 +98,9 @@ pip3 install -r requirements.txt
 # Quick start with auto-discovery
 python3 ndi_receiver.py
 
+# With web interface for remote control
+python3 ndi_receiver.py --config config.led_screen.json --web-server
+
 # List available NDI sources
 python3 list_ndi_sources.py
 
@@ -103,19 +116,49 @@ python3 ndi_receiver.py --test-pattern
 
 See `python3 ndi_receiver.py --help` for all options.
 
+### Web Interface
+
+```bash
+# Start with web interface enabled
+python3 ndi_receiver.py --config config.led_screen.json --web-server
+
+# Access from browser
+http://localhost:8000          # Local access
+http://raspberrypi.local:8000  # Network access (mDNS)
+http://[raspberry-pi-ip]:8000  # Direct IP access
+
+# Custom ports
+python3 ndi_receiver.py --web-server --web-port 8090 --websocket-port 9000
+```
+
+**Features:**
+- 🎛️ **Remote source selection**: Choose any NDI source from dropdown
+- 📊 **Live monitoring**: Real-time FPS, resolution, connection status
+- 🔄 **Auto-refresh**: Source list updates automatically
+- 📱 **Mobile-friendly**: Works on phones and tablets
+- 🌐 **Multi-client**: Multiple browsers can connect simultaneously
+
 ### Smart Auto-Switching
 
 The receiver automatically manages NDI source connections:
 
 **Automatic Source Discovery:**
-- Scans for NDI sources ending with `_led` (configurable suffix)
+- Scans for NDI sources matching regex patterns (e.g., `".*_led"`)
 - Example: `"MACBOOK (TouchDesigner_led)"` ✓ matches, `"MACBOOK (output)"` ✗ doesn't match
+- See [REGEX_PATTERN_GUIDE.md](REGEX_PATTERN_GUIDE.md) for pattern examples
 
 **Intelligent Switching:**
 - 🆕 **New source appears** → Switches immediately to the new source
 - ♻️ **Source reappears** → Switches back when a source comes back online
 - ⚠️ **Current source dies** → Falls back to previous source if available
 - 🔄 **Predictable fallback** → Always returns to the last working source
+- 🎛️ **Manual override** → Web interface selection takes priority, but respects new sources
+
+**Manual Override Logic:**
+- Manual source selection from web interface is "sticky"
+- Prevents switching to existing sources
+- Still switches to new/reappearing sources matching pattern
+- Clears override if manually selected source dies/disappears
 
 **Dead Source Detection:**
 - Monitors frame reception in real-time
@@ -152,17 +195,24 @@ python3 led_test_pattern.py
 RpiSimpleNDI/
 ├── ndi_receiver.py                    # Main NDI receiver CLI ⭐
 ├── list_ndi_sources.py                # NDI source discovery utility
+├── start_server.py                    # Web interface HTTP server
 ├── src/                               # Modular source code
-│   ├── ndi_handler.py                 # NDI management (auto-switching)
+│   ├── ndi_handler.py                 # NDI management (auto-switching, regex)
 │   ├── display_handler.py             # Display/rendering
 │   ├── config.py                      # Configuration management
-│   ├── server_handler.py              # WebSocket (future)
+│   ├── ndi_receiver_ext.py            # Web interface extension
+│   ├── websocket_server.py            # WebSocket server
 │   └── test_patterns.py               # Test patterns
+├── templates/                         # Web interface files
+│   └── index.html                     # Web UI (adapted from TouchDesigner)
 ├── config.example.json                # Example configuration
 ├── config.led_screen.json             # LED screen config
 ├── config.adaptive.json               # Adaptive display config
+├── config.regex_example.json          # Regex pattern examples
 ├── README.md                          # This file
 ├── CLI_GUIDE.md                       # Complete CLI documentation
+├── CONFIG_GUIDE.md                    # Configuration guide
+├── REGEX_PATTERN_GUIDE.md             # Regex pattern examples
 ├── STUDIO_SETUP.md                    # Studio setup guide
 ├── PERFORMANCE_TIPS.md                # Optimization guide
 ├── FFMPEG_NDI_BUILD.md                # FFmpeg compilation guide
@@ -207,9 +257,22 @@ python3 list_ndi_sources.py --timeout 10
 - Ensure NDI sender is active
 
 **Auto-switching not working:**
-- Verify your NDI source name ends with `_led` (inside parentheses)
+- Verify your NDI source name matches the regex pattern (default: `".*_led"`)
 - NDI format: `"COMPUTERNAME (SourceName_led)"`
+- Check pattern in config: `"source_pattern": ".*_led"`
 - Check logs with `--debug` flag
+
+**Web interface not loading:**
+- Check if both HTTP and WebSocket servers started
+- Verify ports are not in use: `sudo lsof -i :8000 -i :8080`
+- Access via: `http://localhost:8000` or `http://raspberrypi.local:8000`
+- Check browser console for WebSocket errors
+
+**Manual source selection not working:**
+- Verify source is available in the network
+- Check WebSocket connection (should show "Connected" in UI)
+- Look for errors in browser console (F12)
+- Check terminal logs for connection errors
 
 **Low FPS / Performance issues:**
 - Use `--cpu-performance` flag to set CPU governor to performance mode
@@ -229,6 +292,18 @@ For issues and questions:
 - Review troubleshooting guides
 
 ## Changelog
+
+### v3.0.0 - Web Interface & Advanced Control
+- 🌐 **Web interface**: Remote control and monitoring via browser
+- 🎛️ **Manual source selection**: Override auto-switching from any device
+- 📡 **WebSocket integration**: Real-time state synchronization
+- 🔄 **Smart manual override**: Respects new/reappearing sources even with manual selection
+- 🧮 **Regex pattern matching**: Flexible source filtering with full regex support
+- ⚡ **Non-blocking architecture**: Background threads for state broadcasting
+- 📊 **Live monitoring**: FPS, resolution, and connection status in browser
+- 🎯 **Source caching**: Performance optimization for source discovery
+- 🔧 **Signal handling**: Clean shutdown with Ctrl+C
+- 📱 **Mobile-friendly UI**: Responsive design for all devices
 
 ### v2.0.0 - Smart Auto-Switching
 - 🎯 **Intelligent NDI source switching**: Automatically switches to new sources with `_led` suffix
