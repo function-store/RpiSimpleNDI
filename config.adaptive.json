@@ -2,7 +2,7 @@
   "description": "Adaptive configuration - auto-detect display and fit content",
   
   "ndi": {
-    "source_suffix": "_led",
+    "source_pattern": ".*_led",
     "scan_timeout": 2,
     "color_format": "bgra"
   },

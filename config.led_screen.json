@@ -2,7 +2,7 @@
   "description": "Configuration for LED screen (800x800 display, 320x320 content)",
   
   "ndi": {
-    "source_suffix": "_led",
+    "source_pattern": ".*_led",
     "scan_timeout": 2,
     "color_format": "bgra"
   },

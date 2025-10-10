@@ -211,8 +211,10 @@ Examples:
     # List sources mode
     if args.list_sources:
         logger.info("Scanning for NDI sources...")
+        # Convert CLI suffix to regex pattern
+        source_pattern = f'.*{args.source_suffix}' if args.source_suffix else '.*_led'
         ndi = NDIHandler(
-            source_suffix=args.source_suffix,
+            source_pattern=source_pattern,
             scan_timeout=args.scan_timeout
         )
         sources = ndi.list_sources()
@@ -220,7 +222,9 @@ Examples:
         if sources:
             print("\nAvailable NDI sources:")
             for i, source in enumerate(sources, 1):
-                suffix = " ✓" if source.endswith(args.source_suffix) else ""
+                # Check if matches pattern
+                matches = ndi._matches_pattern(source)
+                suffix = " ✓" if matches else ""
                 print(f"  [{i}] {source}{suffix}")
         else:
             print("\nNo NDI sources found.")
@@ -317,9 +321,22 @@ Examples:
     
     # Initialize NDI handler
     try:
+        # Get NDI config with defaults
+        ndi_config = config.get('ndi', {}) if config else {}
+        
+        # Use source_pattern from config, or convert CLI suffix to regex pattern
+        source_pattern = ndi_config.get('source_pattern')
+        if not source_pattern and args.source_suffix:
+            # Convert CLI suffix to regex pattern (e.g., '_led' -> '.*_led')
+            source_pattern = f'.*{args.source_suffix}'
+        if not source_pattern:
+            source_pattern = '.*_led'  # Default
+        
         ndi = NDIHandler(
             source_name=args.source,
-            source_suffix=args.source_suffix,
+            source_pattern=source_pattern,
+            enable_plural_handling=ndi_config.get('enable_plural_handling', False),
+            case_sensitive=ndi_config.get('case_sensitive', False),
             scan_timeout=args.scan_timeout,
             color_format=args.color_format,
             auto_switch=not args.no_auto_switch

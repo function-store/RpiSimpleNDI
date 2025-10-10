@@ -49,7 +49,9 @@ class NDIHandler:
     def __init__(
         self,
         source_name: Optional[str] = None,
-        source_suffix: str = '_led',
+        source_pattern: str = '.*_led',
+        enable_plural_handling: bool = False,
+        case_sensitive: bool = False,
         scan_timeout: int = 2,
         color_format: str = 'bgra',
         auto_switch: bool = True
@@ -59,13 +61,17 @@ class NDIHandler:
         
         Args:
             source_name: Specific NDI source to connect to (or None for auto-detect)
-            source_suffix: Auto-detect sources ending with this suffix
+            source_pattern: Regex pattern to match against source names (e.g., '.*_led', 'TouchDesigner.*')
+            enable_plural_handling: Automatically handle singular/plural forms (e.g., projector/projectors)
+            case_sensitive: Whether pattern matching is case-sensitive
             scan_timeout: Seconds to wait for source discovery
             color_format: Color format ('bgra', 'uyvy', 'rgba')
-            auto_switch: Automatically switch to new sources with matching suffix
+            auto_switch: Automatically switch to new sources with matching pattern
         """
         self.source_name = source_name
-        self.source_suffix = source_suffix
+        self.source_pattern = source_pattern
+        self.enable_plural_handling = enable_plural_handling
+        self.case_sensitive = case_sensitive
         self.scan_timeout = scan_timeout
         self.color_format_name = color_format
         self.color_format = self.COLOR_FORMATS.get(color_format, 2)
@@ -83,6 +89,10 @@ class NDIHandler:
         self.no_frame_timeout = 5.0  # Consider source dead after 5 seconds without frames
         self.previous_available_sources = set()  # Track what was available in last check
         
+        # Compile regex pattern
+        self._compiled_pattern = None
+        self._compile_pattern()
+        
         # Load NDI library
         try:
             self.ndi_lib = CDLL("/usr/local/lib/libndi.so.6")
@@ -91,15 +101,78 @@ class NDIHandler:
         except OSError as e:
             logger.error(f"Failed to load NDI library: {e}")
             raise
+    
+    def _transform_pattern_for_plurals(self, pattern: str) -> str:
+        """Transform a regex pattern to handle both singular and plural forms
         
-        # Initialize NDI
-        if not self.ndi_lib.NDIlib_initialize():
-            raise RuntimeError("Failed to initialize NDI")
+        This method adds 's?' to word endings when plural handling is enabled.
+        It's designed to be conservative and only modify simple word patterns.
         
-        logger.info(f"NDI initialized (format: {color_format})")
+        Adapted from NDINamedRouterExt.transformPatternForPlurals
+        """
+        if not self.enable_plural_handling:
+            return pattern
+        
+        # Only apply to simple patterns that end with word characters
+        # This avoids breaking complex regex patterns
+        if re.match(r'^[a-zA-Z0-9_.*]+$', pattern):
+            # Look for word endings and add s? if they don't already have it
+            # This handles patterns like 'projector' -> 'projectors?'
+            # But leaves patterns like 'projector.*' or 'projectors?' unchanged
+            if re.search(r'[a-zA-Z0-9_]$', pattern) and not pattern.endswith('s?'):
+                transformed = pattern + 's?'
+                logger.debug(f"Transformed pattern for plurals: '{pattern}' -> '{transformed}'")
+                return transformed
+        
+        return pattern
+    
+    def _compile_pattern(self):
+        """Compile the regex pattern for matching"""
+        pattern = self._transform_pattern_for_plurals(self.source_pattern)
+        
+        flags = 0 if self.case_sensitive else re.IGNORECASE
+        
+        try:
+            self._compiled_pattern = re.compile(pattern, flags)
+            logger.info(f"Compiled regex pattern: '{pattern}' (case_sensitive={self.case_sensitive})")
+        except re.error as e:
+            logger.error(f"Invalid regex pattern '{pattern}': {e}")
+            raise ValueError(f"Invalid regex pattern: {pattern}") from e
+    
+    def _extract_source_name(self, full_name: str) -> str:
+        """Extract the source name from NDI full name format
+        
+        NDI sources are formatted as "COMPUTERNAME (SourceName)"
+        This extracts just the "SourceName" part for matching.
+        """
+        if '(' in full_name and ')' in full_name:
+            # Extract source name from parentheses
+            return full_name.split('(')[1].split(')')[0]
+        else:
+            # Fallback to full name
+            return full_name
+    
+    def _matches_pattern(self, source_name: str) -> bool:
+        """Check if a source name matches our regex pattern
+        
+        Args:
+            source_name: Full NDI source name (e.g., "COMPUTERNAME (SourceName)")
+        
+        Returns:
+            True if the source matches the pattern
+        """
+        # Extract just the source name part
+        extracted_name = self._extract_source_name(source_name)
+        
+        if self._compiled_pattern is None:
+            return False
+        
+        # Use fullmatch to match entire source name
+        match = self._compiled_pattern.fullmatch(extracted_name)
+        return match is not None
     
     def _setup_functions(self):
-        """Setup NDI library function signatures"""
+        """Setup NDI library function signatures and initialize NDI"""
         self.ndi_lib.NDIlib_initialize.restype = c_bool
         self.ndi_lib.NDIlib_find_create_v2.restype = c_void_p
         self.ndi_lib.NDIlib_find_create_v2.argtypes = [c_void_p]
@@ -161,18 +234,10 @@ class NDIHandler:
                 logger.info(f"Found exact match: {name}")
                 break
             
-            # Suffix match (priority)
-            # NDI sources are formatted as "COMPUTERNAME (SourceName)"
-            matches_suffix = False
-            if '(' in name and ')' in name:
-                source_part = name.split('(')[1].split(')')[0]
-                matches_suffix = source_part.endswith(self.source_suffix)
-            else:
-                matches_suffix = name.endswith(self.source_suffix)
-            
-            if matches_suffix:
+            # Pattern match (priority)
+            if self._matches_pattern(name):
                 target_source = source
-                logger.info(f"Found source with suffix '{self.source_suffix}': {name}")
+                logger.info(f"Found source matching pattern '{self.source_pattern}': {name}")
                 break
         
         # Fallback to first source
@@ -248,18 +313,8 @@ class NDIHandler:
             source = sources[i]
             name = source.p_ndi_name.decode('utf-8') if source.p_ndi_name else ""
             
-            # NDI sources are formatted as "COMPUTERNAME (SourceName)"
-            # Check if the source name (part in parentheses) ends with suffix
-            matches_suffix = False
-            if '(' in name and ')' in name:
-                # Extract source name from parentheses
-                source_part = name.split('(')[1].split(')')[0]
-                matches_suffix = source_part.endswith(self.source_suffix)
-            else:
-                # Fallback to full name check
-                matches_suffix = name.endswith(self.source_suffix)
-            
-            if matches_suffix:
+            # Check if source matches our pattern
+            if self._matches_pattern(name):
                 available_sources.append((name, source))
                 if name == self.connected_source:
                     current_source_exists = True

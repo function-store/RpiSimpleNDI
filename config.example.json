@@ -1,9 +1,19 @@
 {
   "ndi": {
-    "source_suffix": "_led",
+    "source_pattern": ".*_led",
+    "enable_plural_handling": false,
+    "case_sensitive": false,
     "scan_timeout": 2,
     "color_format": "bgra",
-    "auto_switch": true
+    "auto_switch": true,
+    "_comment": "Regex pattern examples:",
+    "_examples": {
+      "any_led": ".*_led",
+      "touchdesigner": "TouchDesigner.*",
+      "multiple_suffixes": ".*(led|output|main)",
+      "numbered": "out_[0-9]+",
+      "projectors_plural": "projector (with enable_plural_handling: true)"
+    }
   },
   "display": {
     "resolution": null,
