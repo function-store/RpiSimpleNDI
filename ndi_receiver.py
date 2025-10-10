@@ -8,6 +8,7 @@ import argparse
 import sys
 import logging
 import time
+import signal
 from pathlib import Path
 
 # Version
@@ -27,6 +28,14 @@ logger = logging.getLogger('ndi_receiver')
 
 def main():
     """Main entry point for the LED Receiver application"""
+    
+    # Setup signal handlers for clean exit
+    def signal_handler(signum, frame):
+        logger.info("Shutdown signal received")
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
     parser = argparse.ArgumentParser(
         description='LED Receiver - NDI to LED Screen Display',
@@ -87,6 +96,26 @@ Examples:
         '--no-auto-switch',
         action='store_true',
         help='Disable automatic switching to new sources with matching suffix'
+    )
+    
+    # Web server options
+    web_group = parser.add_argument_group('Web Interface Options')
+    web_group.add_argument(
+        '--web-server',
+        action='store_true',
+        help='Start web server for remote control and monitoring'
+    )
+    web_group.add_argument(
+        '--web-port',
+        type=int,
+        default=8000,
+        help='HTTP server port (default: 8000, use 80 for standard but requires sudo)'
+    )
+    web_group.add_argument(
+        '--websocket-port',
+        type=int,
+        default=8080,
+        help='WebSocket server port (default: 8080)'
     )
     
     # Display options
@@ -359,6 +388,88 @@ Examples:
         logger.error(f"NDI connection error: {e}")
         display.cleanup()
         return 1
+    
+    # Initialize web server if requested
+    web_extension = None
+    websocket_server = None
+    http_server_thread = None
+    
+    if args.web_server:
+        try:
+            from src.ndi_receiver_ext import NDIReceiverExt
+            from src.websocket_server import start_websocket_server
+            import subprocess
+            import threading
+            import os
+            
+            logger.info("Initializing web interface...")
+            
+            # Determine receiver name
+            receiver_name = "NDI Receiver"  # Default
+            if config and config.get('name'):
+                receiver_name = config.get('name')
+            elif args.config:
+                # Use config filename without extension as fallback
+                base_name = os.path.splitext(os.path.basename(args.config))[0]
+                # Convert config.led_screen -> LED Screen
+                receiver_name = base_name.replace('config.', '').replace('_', ' ').title()
+            
+            # Create extension
+            web_extension = NDIReceiverExt(ndi, display, receiver_name=receiver_name)
+            logger.info(f"✓ Web extension initialized (name: '{receiver_name}')")
+            
+            # Start WebSocket server
+            websocket_server = start_websocket_server(web_extension, port=args.websocket_port)
+            logger.info(f"✓ WebSocket server started on port {args.websocket_port}")
+            
+            # Start HTTP server for web interface
+            def run_http_server():
+                try:
+                    cmd = [
+                        'python3', 'start_server.py',
+                        '--port', str(args.web_port),
+                        '--websocket-port', str(args.websocket_port),
+                        '--no-browser'
+                    ]
+                    subprocess.run(cmd, cwd='/home/catatumbo/led_test')
+                except Exception as e:
+                    logger.error(f"HTTP server error: {e}")
+            
+            http_server_thread = threading.Thread(target=run_http_server, daemon=True)
+            http_server_thread.start()
+            logger.info(f"✓ HTTP server started on port {args.web_port}")
+            
+            # Start background state broadcaster (non-blocking)
+            def broadcast_state_updates():
+                import time
+                while True:
+                    time.sleep(10)  # Broadcast every 10 seconds
+                    try:
+                        if web_extension and hasattr(web_extension, 'webHandler'):
+                            web_extension.webHandler.broadcastStateUpdate()
+                    except Exception as e:
+                        logger.debug(f"Error broadcasting state: {e}")
+            
+            broadcast_thread = threading.Thread(target=broadcast_state_updates, daemon=True)
+            broadcast_thread.start()
+            logger.info(f"✓ State broadcast thread started")
+            
+            logger.info("")
+            logger.info("=" * 60)
+            logger.info("🌐 WEB INTERFACE READY")
+            logger.info("=" * 60)
+            logger.info(f"  Local:    http://localhost:{args.web_port}")
+            logger.info(f"  Network:  http://[raspberry-pi-ip]:{args.web_port}")
+            logger.info(f"  WebSocket: ws://localhost:{args.websocket_port}")
+            logger.info("=" * 60)
+            logger.info("")
+            
+        except ImportError as e:
+            logger.error(f"Failed to load web server dependencies: {e}")
+            logger.error("Install with: pip3 install websockets")
+        except Exception as e:
+            logger.error(f"Failed to initialize web interface: {e}")
+            logger.exception(e)
     
     # Main loop
     logger.info("Starting video reception...")

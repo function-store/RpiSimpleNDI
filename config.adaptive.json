@@ -1,4 +1,5 @@
 {
+  "name": "Adaptive Display",
   "description": "Adaptive configuration - auto-detect display and fit content",
   
   "ndi": {

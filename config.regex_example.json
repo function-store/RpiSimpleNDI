@@ -1,4 +1,5 @@
 {
+  "name": "Regex Example",
   "ndi": {
     "source_pattern": ".*_led",
     "pattern_type": "regex",

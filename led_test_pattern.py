@@ -65,9 +65,9 @@ class LEDTestPattern:
         try:
             self.screen = pygame.display.set_mode(DISPLAY_SIZE, pygame.FULLSCREEN)
             print(f"Display initialized at {DISPLAY_SIZE}")
-        except pygame.error as e:
-            print(f"Failed to initialize display: {e}")
-            sys.exit(1)
+            except pygame.error as e:
+                print(f"Failed to initialize display: {e}")
+                sys.exit(1)
         
         # Create a surface for the LED screen content (320x320)
         self.led_surface = pygame.Surface(SCREEN_SIZE)

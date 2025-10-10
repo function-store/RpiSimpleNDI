@@ -1,4 +1,5 @@
 {
+  "name": "NDI Receiver",
   "ndi": {
     "source_pattern": ".*_led",
     "enable_plural_handling": false,

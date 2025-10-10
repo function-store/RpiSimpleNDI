@@ -8,6 +8,7 @@ import time
 import logging
 from typing import Optional, List, Tuple
 import numpy as np
+import re
 
 logger = logging.getLogger('ndi_receiver.ndi')
 
@@ -82,6 +83,7 @@ class NDIHandler:
         self.ndi_recv = None
         self.connected_source = None
         self.previous_source = None  # Track the source we were on before current
+        self.manual_override = False  # Set to True when user manually selects a source
         self.video_frame = NDIlib_video_frame_v2_t()
         self.last_source_check = 0
         self.source_check_interval = 2.0  # Check for new sources every 2 seconds
@@ -278,6 +280,10 @@ class NDIHandler:
         if not self.auto_switch or not self.ndi_find:
             return False
         
+        # Manual override only prevents switching to existing sources
+        # New or reappearing sources that match the pattern can still override
+        # But if the manual source is alive, we'll check for new/reappearing sources below
+        
         import time
         now = time.time()
         
@@ -313,13 +319,20 @@ class NDIHandler:
             source = sources[i]
             name = source.p_ndi_name.decode('utf-8') if source.p_ndi_name else ""
             
-            # Check if source matches our pattern
+            # Check if this is our current source (regardless of pattern match)
+            if name == self.connected_source:
+                current_source_exists = True
+            
+            # Check if source matches our pattern for auto-switching
             if self._matches_pattern(name):
                 available_sources.append((name, source))
-                if name == self.connected_source:
-                    current_source_exists = True
         
+        # If no matching sources available, only continue if current source is missing
         if len(available_sources) == 0:
+            # If current source still exists (manual override), that's fine
+            if current_source_exists and self.manual_override:
+                return False
+            # Otherwise, current source disappeared and no alternatives
             return False
         
         # Get current available source names
@@ -342,6 +355,11 @@ class NDIHandler:
             # Current source disappeared - try to fall back to previous source first
             logger.warning(f"Current source '{self.connected_source}' is no longer available")
             
+            # Clear manual override - source is gone
+            if self.manual_override:
+                logger.info(f"Clearing manual override - selected source disappeared")
+                self.manual_override = False
+            
             # Check if previous source is available
             if self.previous_source and any(name == self.previous_source for name, _ in available_sources):
                 logger.info(f"Falling back to previous source: {self.previous_source}")
@@ -358,6 +376,11 @@ class NDIHandler:
             # Current source is dead - try to fall back to previous source first
             logger.warning(f"Current source '{self.connected_source}' appears to be dead (no frames)")
             
+            # Clear manual override - source is dead
+            if self.manual_override:
+                logger.info(f"Clearing manual override - selected source is dead")
+                self.manual_override = False
+            
             # Check if previous source is available
             if self.previous_source and any(name == self.previous_source for name, _ in available_sources):
                 logger.info(f"Falling back to previous source: {self.previous_source}")
@@ -372,9 +395,15 @@ class NDIHandler:
             
         elif newly_appeared_with_suffix:
             # A source appeared (or reappeared) that wasn't available in the last check
+            # This overrides manual selection - new/reappearing sources take priority
             new_sources = newly_appeared_with_suffix
             should_switch = True
             switch_reason = "source (re)appeared"
+            
+            # Clear manual override - new/reappearing sources take priority
+            if self.manual_override:
+                logger.info(f"Clearing manual override - new/reappearing source detected")
+                self.manual_override = False
         
         if should_switch and new_sources:
             # Pick the first new source (they're in discovery order, newest typically last)
