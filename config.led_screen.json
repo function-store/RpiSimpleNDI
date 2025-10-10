@@ -1,0 +1,34 @@
+{
+  "description": "Configuration for LED screen (800x800 display, 320x320 content)",
+  
+  "ndi": {
+    "source_suffix": "_led",
+    "scan_timeout": 2,
+    "color_format": "bgra"
+  },
+  
+  "display": {
+    "resolution": "800x800",
+    "fullscreen": true,
+    "video_driver": "auto",
+    "show_fps": false
+  },
+  
+  "content": {
+    "resolution": "320x320",
+    "position": "0,0",
+    "rotation": 180,
+    "scaling": "none"
+  },
+  
+  "performance": {
+    "cpu_performance_mode": true,
+    "priority": -10
+  },
+  
+  "logging": {
+    "level": "INFO"
+  }
+}
+
+

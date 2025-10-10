@@ -1,0 +1,34 @@
+{
+  "description": "Adaptive configuration - auto-detect display and fit content",
+  
+  "ndi": {
+    "source_suffix": "_led",
+    "scan_timeout": 2,
+    "color_format": "bgra"
+  },
+  
+  "display": {
+    "resolution": null,
+    "fullscreen": true,
+    "video_driver": "auto",
+    "show_fps": true
+  },
+  
+  "content": {
+    "resolution": null,
+    "position": null,
+    "rotation": 0,
+    "scaling": "fit"
+  },
+  
+  "performance": {
+    "cpu_performance_mode": true,
+    "priority": 0
+  },
+  
+  "logging": {
+    "level": "INFO"
+  }
+}
+
+

@@ -1,0 +1,72 @@
+{
+  "ndi": {
+    "source_suffix": "_led",
+    "scan_timeout": 2,
+    "color_format": "bgra",
+    "auto_switch": true
+  },
+  "display": {
+    "resolution": null,
+    "fullscreen": false,
+    "video_driver": "auto",
+    "show_fps": false
+  },
+  "content": {
+    "resolution": null,
+    "position": null,
+    "rotation": null,
+    "scaling": "fit"
+  },
+  "performance": {
+    "cpu_performance_mode": false,
+    "priority": 0
+  },
+  "server": {
+    "enabled": false,
+    "url": "ws://localhost:8080",
+    "token": null
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "ndi_receiver.log"
+  },
+  "profiles": {
+    "led_screen": {
+      "display": {
+        "resolution": "800x800",
+        "fullscreen": true
+      },
+      "content": {
+        "resolution": "320x320",
+        "position": "0,0",
+        "rotation": 180,
+        "scaling": "none"
+      }
+    },
+    "lcd_test": {
+      "display": {
+        "resolution": "1366x768",
+        "fullscreen": false
+      },
+      "content": {
+        "resolution": null,
+        "position": "center",
+        "rotation": 0,
+        "scaling": "fit"
+      }
+    },
+    "adaptive": {
+      "display": {
+        "resolution": null,
+        "fullscreen": true
+      },
+      "content": {
+        "resolution": null,
+        "position": null,
+        "rotation": 0,
+        "scaling": "fit"
+      }
+    }
+  }
+}
+
