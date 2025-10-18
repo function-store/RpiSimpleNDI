@@ -21,7 +21,7 @@ def debug(message):
 class NDIReceiverExt:
     """Extension class for NDI Receiver - provides web interface integration"""
     
-    def __init__(self, ndi_handler, display_handler=None, receiver_name="NDI Receiver"):
+    def __init__(self, ndi_handler, display_handler=None, receiver_name="NDI Receiver", component_id=None, component_name=None):
         """
         Initialize the extension
         
@@ -29,10 +29,23 @@ class NDIReceiverExt:
             ndi_handler: NDIHandler instance
             display_handler: DisplayHandler instance (optional)
             receiver_name: Display name for this receiver (default: "NDI Receiver")
+            component_id: Unique component ID for bridge mode (default: auto-generated from hostname)
+            component_name: Human-readable component name for bridge mode (default: receiver_name)
         """
         self.ndi_handler = ndi_handler
         self.display_handler = display_handler
         self.receiver_name = receiver_name
+        
+        # Bridge compatibility fields
+        if component_id is None:
+            import socket
+            hostname = socket.gethostname()
+            self.component_id = f"RaspberryPi_{hostname}"
+        else:
+            self.component_id = component_id
+        
+        self.component_name = component_name if component_name else receiver_name
+        self.client_type = "controller"  # Bridge client type
         
         # Cache for available sources (to avoid blocking on every state request)
         self._cached_sources = []
@@ -99,8 +112,38 @@ class NDIReceiverExt:
             # Build state dict
             # Note: We adapt to TouchDesigner's web UI format which expects arrays for multiple blocks
             # Since we're a single receiver, we create arrays with one element
+            
+            # Build effective regex pattern (with plural handling if enabled)
+            effective_pattern = self.ndi_handler.source_pattern or '.*'
+            if self.ndi_handler.enable_plural_handling and not effective_pattern.endswith('s?'):
+                # Simple plural handling - add s? if pattern ends with word character
+                import re
+                if re.search(r'[a-zA-Z0-9_]$', effective_pattern):
+                    effective_pattern = effective_pattern + 's?'
+            
             state = {
+                # Bridge compatibility fields
+                'component_id': self.component_id,
+                'component_name': self.component_name,
+                'client_type': self.client_type,
+                
+                # Core NDI fields
                 'sources': sources,
+                'output_names': [self.receiver_name],
+                'current_sources': [current_source or ''],
+                'regex_patterns': [self.ndi_handler.source_pattern or '.*'],
+                'effective_regex_patterns': [effective_pattern],
+                'output_resolutions': [resolution],
+                'plural_handling_enabled': self.ndi_handler.enable_plural_handling,
+                
+                # Lock state
+                'locks': [self.ndi_handler.is_locked()],
+                'lock_global': False,  # RPi has only one output, no global lock concept
+                
+                # Timestamps
+                'last_update': time.time(),
+                
+                # RPi-specific extra fields (for standalone mode)
                 'current_source': current_source or '',
                 'connected': connected,
                 'fps': fps,
@@ -112,12 +155,7 @@ class NDIReceiverExt:
                     'plural_handling': self.ndi_handler.enable_plural_handling
                 },
                 'auto_switch_enabled': self.ndi_handler.auto_switch,
-                'last_update': time.time(),
-                # TouchDesigner web UI compatibility: expects arrays for multiple blocks
-                'output_names': [self.receiver_name],
-                'regex_patterns': [self.ndi_handler.source_pattern or '.*'],
-                'current_sources': [current_source or ''],
-                'output_resolutions': [resolution],
+                'locked': self.ndi_handler.is_locked(),
                 'output_sources': {
                     self.receiver_name: current_source or ''
                 }
@@ -130,15 +168,27 @@ class NDIReceiverExt:
             debug(f'Error getting current state: {e}')
             logger.error(f'Error getting current state: {e}')
             return {
+                # Bridge compatibility fields
+                'component_id': self.component_id,
+                'component_name': self.component_name,
+                'client_type': self.client_type,
+                
+                # Core fields
                 'sources': [],
+                'output_names': [self.receiver_name],
+                'current_sources': [''],
+                'regex_patterns': ['.*'],
+                'effective_regex_patterns': ['.*'],
+                'output_resolutions': [[0, 0]],
+                'plural_handling_enabled': False,
+                'locks': [False],
+                'lock_global': False,
+                'last_update': time.time(),
+                
+                # RPi-specific
                 'current_source': '',
                 'connected': False,
                 'error': str(e),
-                'last_update': time.time(),
-                'output_names': [self.receiver_name],
-                'regex_patterns': ['.*'],
-                'current_sources': [''],
-                'output_resolutions': [[0, 0]],
                 'output_sources': {self.receiver_name: ''}
             }
     
@@ -156,6 +206,8 @@ class NDIReceiverExt:
         try:
             debug(f'Set source request: {source_name}')
             logger.info(f'Web interface requesting source change to: {source_name}')
+            logger.info(f'Current lock state: {self.ndi_handler.is_locked()}')
+            logger.info(f'Manual selection should work regardless of lock state')
             
             # Disconnect current source
             if self.ndi_handler.ndi_recv:
@@ -254,6 +306,153 @@ class NDIReceiverExt:
             debug(f'Error refreshing sources: {e}')
             logger.error(f'Error refreshing sources: {e}')
             return False
+    
+    def handleSetLock(self, locked):
+        """Handle lock state change from web interface
+        
+        Args:
+            locked: True to lock (prevent auto-switching), False to unlock
+            
+        Returns:
+            True if successful, False otherwise
+            
+        Adapted from NDINamedRouterExt (per-block lock behavior)
+        """
+        try:
+            debug(f'Set lock request: {locked}')
+            logger.info(f'Web interface requesting lock state change to: {locked}')
+            
+            # Set lock state
+            self.ndi_handler.set_locked(locked)
+            
+            # Broadcast updated state
+            if hasattr(self, 'webHandler'):
+                self.webHandler.broadcastStateUpdate()
+            
+            return True
+            
+        except Exception as e:
+            debug(f'Error setting lock: {e}')
+            logger.error(f'Error setting lock: {e}')
+            return False
+    
+    def handleSetLockGlobal(self, locked):
+        """Handle global lock state change (bridge compatibility)
+        
+        Since RPi has only one output, global lock applies to that single output.
+        
+        Args:
+            locked: True to lock, False to unlock
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            debug(f'Set global lock request: {locked}')
+            logger.info(f'Bridge requesting global lock state change to: {locked}')
+            
+            # For single output, global lock is same as block lock
+            self.ndi_handler.set_locked(locked)
+            
+            # Broadcast updated state
+            if hasattr(self, 'webHandler'):
+                self.webHandler.broadcastStateUpdate()
+            
+            return True
+            
+        except Exception as e:
+            debug(f'Error setting global lock: {e}')
+            logger.error(f'Error setting global lock: {e}')
+            return False
+    
+    def handleSaveConfiguration(self):
+        """Handle save configuration request (bridge compatibility)
+        
+        Saves current source and lock state to a JSON file.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            debug('Saving configuration')
+            logger.info('Bridge requesting configuration save')
+            
+            import json
+            from pathlib import Path
+            
+            # Build configuration dict
+            config_data = {
+                'current_source': self.ndi_handler.get_source_name(),
+                'locked': self.ndi_handler.is_locked(),
+                'pattern': self.ndi_handler.source_pattern,
+                'saved_at': time.time()
+            }
+            
+            # Save to file
+            config_file = Path.home() / '.ndi_receiver_saved_config.json'
+            with open(config_file, 'w') as f:
+                json.dump(config_data, f, indent=2)
+            
+            logger.info(f'Configuration saved to {config_file}')
+            
+            # Broadcast updated state
+            if hasattr(self, 'webHandler'):
+                self.webHandler.broadcastStateUpdate()
+            
+            return True
+            
+        except Exception as e:
+            debug(f'Error saving configuration: {e}')
+            logger.error(f'Error saving configuration: {e}')
+            return False
+    
+    def handleRecallConfiguration(self):
+        """Handle recall configuration request (bridge compatibility)
+        
+        Recalls previously saved source and lock state from JSON file.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            debug('Recalling configuration')
+            logger.info('Bridge requesting configuration recall')
+            
+            import json
+            from pathlib import Path
+            
+            # Load from file
+            config_file = Path.home() / '.ndi_receiver_saved_config.json'
+            if not config_file.exists():
+                logger.warning('No saved configuration found')
+                return False
+            
+            with open(config_file, 'r') as f:
+                config_data = json.load(f)
+            
+            # Apply saved source
+            saved_source = config_data.get('current_source')
+            if saved_source:
+                logger.info(f'Recalling saved source: {saved_source}')
+                self.handleSetSource(saved_source)
+            
+            # Apply saved lock state
+            saved_locked = config_data.get('locked', False)
+            logger.info(f'Recalling saved lock state: {saved_locked}')
+            self.ndi_handler.set_locked(saved_locked)
+            
+            logger.info(f'Configuration recalled from {config_file}')
+            
+            # Broadcast updated state
+            if hasattr(self, 'webHandler'):
+                self.webHandler.broadcastStateUpdate()
+            
+            return True
+            
+        except Exception as e:
+            debug(f'Error recalling configuration: {e}')
+            logger.error(f'Error recalling configuration: {e}')
+            return False
 
 
 class WebHandler:
@@ -266,6 +465,7 @@ class WebHandler:
         self.extension = extension
         self.webServerDAT = None  # Will be set by the WebSocket server
         self.connected_clients = set()  # Track connected clients
+        self.bridge_client = None  # Will be set if connecting to bridge server
         debug('WebHandler initialized')
     
     def setWebServer(self, webserver):
@@ -307,15 +507,15 @@ class WebHandler:
         debug(f'Message sent to {len(self.connected_clients)} clients')
     
     def broadcastStateUpdate(self):
-        """Broadcast current state to all connected WebSocket clients
+        """Broadcast current state to all connected WebSocket clients and bridge
         
         Adapted from NDINamedRouterExt.WebHandler.broadcastStateUpdate()
         """
-        if not self.connected_clients:
-            debug('No connected clients to broadcast to')
+        if not self.connected_clients and not self.bridge_client:
+            debug('No connected clients or bridge to broadcast to')
             return
         
-        debug('Broadcasting state update to all connected clients')
+        debug('Broadcasting state update')
         
         if self.extension:
             state = self.extension.getCurrentState()
@@ -325,21 +525,29 @@ class WebHandler:
                 'state': state
             }
             message = json.dumps(response)
-            self.broadcastToAll(message)
-            debug('State broadcast completed')
+            
+            # Broadcast to local web clients
+            if self.connected_clients:
+                self.broadcastToAll(message)
+                debug('State broadcast to local clients completed')
+            
+            # Broadcast to bridge server
+            if self.bridge_client and hasattr(self.bridge_client, 'broadcast_state_update'):
+                self.bridge_client.broadcast_state_update()
+                debug('State broadcast to bridge completed')
         else:
             debug('WARNING: Extension not found for broadcast')
     
     def broadcastSourceChange(self, source_name):
-        """Broadcast source change to all connected WebSocket clients
+        """Broadcast source change to all connected WebSocket clients and bridge
         
         Args:
             source_name: Name of the new source
             
         Adapted from NDINamedRouterExt.WebHandler.broadcastSourceChange()
         """
-        if not self.connected_clients:
-            debug('No connected clients to broadcast to')
+        if not self.connected_clients and not self.bridge_client:
+            debug('No connected clients or bridge to broadcast to')
             return
         
         debug(f'Broadcasting source change: {source_name}')
@@ -349,8 +557,16 @@ class WebHandler:
             'source_name': source_name
         }
         message = json.dumps(response)
-        self.broadcastToAll(message)
-        debug('Source change broadcast completed')
+        
+        # Broadcast to local web clients
+        if self.connected_clients:
+            self.broadcastToAll(message)
+            debug('Source change broadcast to local clients completed')
+        
+        # Broadcast to bridge server (block_idx=0 for single-output RPi receiver)
+        if self.bridge_client and hasattr(self.bridge_client, 'broadcast_source_change'):
+            self.bridge_client.broadcast_source_change(0, source_name)
+            debug('Source change broadcast to bridge completed')
     
     def sendInitialState(self, client):
         """Send initial state to a newly connected client
@@ -468,6 +684,123 @@ class WebHandler:
                     error_response = {
                         'action': 'error',
                         'message': 'Failed to refresh sources'
+                    }
+                    self.webServerDAT.send_message(client, json.dumps(error_response))
+            
+            elif action == 'set_lock':
+                debug('Processing set_lock action')
+                block_idx = data.get('block_idx', 0)  # RPi only has one output (index 0)
+                locked = data.get('locked')
+                debug(f'Set lock parameters: block_idx={block_idx}, locked={locked}')
+                
+                if locked is not None:
+                    debug('Valid set_lock parameters, calling extension handler')
+                    success = self.extension.handleSetLock(locked)
+                    debug(f'Extension handleSetLock result: {success}')
+                    
+                    if success:
+                        debug('Set lock successful, getting updated state')
+                        state = self.extension.getCurrentState()
+                        response = {
+                            'action': 'state_update',
+                            'state': state
+                        }
+                        self.webServerDAT.send_message(client, json.dumps(response))
+                        debug('Lock state updated successfully')
+                    else:
+                        debug('Set lock failed, sending error response')
+                        error_response = {
+                            'action': 'error',
+                            'message': f'Failed to set lock state'
+                        }
+                        self.webServerDAT.send_message(client, json.dumps(error_response))
+                else:
+                    debug('Invalid set_lock parameters, sending error response')
+                    error_response = {
+                        'action': 'error',
+                        'message': 'Invalid set_lock parameters'
+                    }
+                    self.webServerDAT.send_message(client, json.dumps(error_response))
+            
+            elif action == 'set_lock_global':
+                debug('Processing set_lock_global action')
+                locked = data.get('locked')
+                debug(f'Set global lock: {locked}')
+                
+                if locked is not None:
+                    debug('Valid set_lock_global parameters, calling extension handler')
+                    success = self.extension.handleSetLockGlobal(locked)
+                    debug(f'Extension handleSetLockGlobal result: {success}')
+                    
+                    if success:
+                        debug('Set global lock successful, getting updated state')
+                        state = self.extension.getCurrentState()
+                        response = {
+                            'action': 'state_update',
+                            'state': state
+                        }
+                        self.webServerDAT.send_message(client, json.dumps(response))
+                        debug('Global lock state updated successfully')
+                    else:
+                        debug('Set global lock failed, sending error response')
+                        error_response = {
+                            'action': 'error',
+                            'message': f'Failed to set global lock state'
+                        }
+                        self.webServerDAT.send_message(client, json.dumps(error_response))
+                else:
+                    debug('Invalid set_lock_global parameters, sending error response')
+                    error_response = {
+                        'action': 'error',
+                        'message': 'Invalid set_lock_global parameters'
+                    }
+                    self.webServerDAT.send_message(client, json.dumps(error_response))
+            
+            elif action == 'save_configuration':
+                debug('Processing save_configuration action')
+                success = self.extension.handleSaveConfiguration()
+                debug(f'Extension handleSaveConfiguration result: {success}')
+                
+                if success:
+                    debug('Save configuration successful, getting updated state')
+                    state = self.extension.getCurrentState()
+                    response = {
+                        'action': 'configuration_saved',
+                        'state': state,
+                        'message': 'Configuration saved successfully'
+                    }
+                    debug('Sending configuration saved response')
+                    self.webServerDAT.send_message(client, json.dumps(response))
+                    debug('Configuration saved response sent successfully')
+                else:
+                    debug('Save configuration failed, sending error response')
+                    error_response = {
+                        'action': 'error',
+                        'message': 'Failed to save configuration'
+                    }
+                    self.webServerDAT.send_message(client, json.dumps(error_response))
+            
+            elif action == 'recall_configuration':
+                debug('Processing recall_configuration action')
+                success = self.extension.handleRecallConfiguration()
+                debug(f'Extension handleRecallConfiguration result: {success}')
+                
+                if success:
+                    debug('Recall configuration successful, getting updated state')
+                    state = self.extension.getCurrentState()
+                    response = {
+                        'action': 'configuration_recalled',
+                        'state': state,
+                        'message': 'Configuration recalled successfully'
+                    }
+                    debug('Sending configuration recalled response')
+                    self.webServerDAT.send_message(client, json.dumps(response))
+                    debug('Configuration recalled response sent successfully')
+                else:
+                    debug('Recall configuration failed, sending error response')
+                    error_response = {
+                        'action': 'error',
+                        'message': 'Failed to recall configuration'
                     }
                     self.webServerDAT.send_message(client, json.dumps(error_response))
             

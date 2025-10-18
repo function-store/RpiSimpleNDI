@@ -92,6 +92,57 @@ This separation allows you to:
 - Rotates the content before positioning
 - For 90° or 270°, width and height are swapped
 
+### Bridge Configuration (TD_NDI_NamedRouter Integration)
+
+```json
+"bridge": {
+  "enabled": false,              // Enable bridge client mode
+  "url": null,                   // Bridge server URL (e.g., ws://bridge-server:8081)
+  "component_id": null,          // Unique ID for bridge mode
+                                 // null = auto-generated from hostname
+  "component_name": "LED Wall"   // Human-readable name for bridge display
+                                 // null = uses "name" field
+}
+```
+
+**Bridge Mode:**
+When connecting to a TD_NDI_NamedRouter bridge server, this Raspberry Pi receiver will appear in the unified web interface alongside TouchDesigner instances and other RPi receivers.
+
+**Fields:**
+- `enabled`: Set to `true` to enable bridge mode (can be overridden with `--bridge-url` CLI arg)
+- `url`: WebSocket URL of the bridge server component port (default: 8081)
+- `component_id`: Unique identifier for this component
+- `component_name`: Human-readable display name
+
+**Configuration Priority:**
+1. CLI arguments (`--bridge-url`, `--component-id`, `--component-name`)
+2. Config file (`bridge` section)
+3. Auto-generated defaults
+
+**Default Values:**
+- `component_id`: Auto-generated as `"RaspberryPi_<hostname>"`
+- `component_name`: Uses the `"name"` field from config
+
+**Example (Multi-RPi Setup with Bridge):**
+```json
+{
+  "name": "LED Screen",
+  "bridge": {
+    "enabled": true,
+    "url": "ws://192.168.1.100:8081",
+    "component_id": "LED_Wall_Main",
+    "component_name": "LED Wall - Stage Left"
+  }
+}
+```
+
+This connects to the bridge at `192.168.1.100:8081` and appears in the interface as "LED Wall - Stage Left" with ID "LED_Wall_Main".
+
+**Modes:**
+- **Standalone**: `--web-server` (local web interface only)
+- **Bridge only**: `--bridge-url ws://server:8081 --bridge-only` (no local web server)
+- **Hybrid**: `--web-server --bridge-url ws://server:8081` (both local and bridge)
+
 ## Example Configurations
 
 ### 1. LED Screen (800x800 display, 320x320 content)
@@ -335,5 +386,8 @@ python3 ndi_receiver.py --config config.led_screen.json
 **See Also**: 
 - [CLI_GUIDE.md](CLI_GUIDE.md) - Command line options
 - [STUDIO_SETUP.md](STUDIO_SETUP.md) - Studio setup guide
+
+
+
 
 

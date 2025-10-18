@@ -84,6 +84,7 @@ class NDIHandler:
         self.connected_source = None
         self.previous_source = None  # Track the source we were on before current
         self.manual_override = False  # Set to True when user manually selects a source
+        self.locked = False  # When True, prevents automatic source switching
         self.video_frame = NDIlib_video_frame_v2_t()
         self.last_source_check = 0
         self.source_check_interval = 2.0  # Check for new sources every 2 seconds
@@ -278,6 +279,11 @@ class NDIHandler:
             True if switched to a new source
         """
         if not self.auto_switch or not self.ndi_find:
+            return False
+        
+        # If locked, prevent all automatic source switching
+        if self.locked:
+            logger.debug("Source is locked - skipping auto-switching")
             return False
         
         # Manual override only prevents switching to existing sources
@@ -501,6 +507,26 @@ class NDIHandler:
     def get_color_format(self) -> str:
         """Get the current color format"""
         return self.color_format_name
+    
+    def is_locked(self) -> bool:
+        """Check if source switching is locked"""
+        return self.locked
+    
+    def set_locked(self, locked: bool):
+        """
+        Set lock state for source switching
+        
+        Args:
+            locked: True to prevent automatic source switching, False to allow it
+        """
+        old_state = self.locked
+        self.locked = locked
+        if old_state != locked:
+            logger.info(f"Lock state changed: {'LOCKED' if locked else 'UNLOCKED'}")
+            if locked:
+                logger.info("Automatic source switching is now disabled")
+            else:
+                logger.info("Automatic source switching is now enabled")
     
     def disconnect(self):
         """Disconnect from NDI source and cleanup"""

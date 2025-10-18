@@ -1,0 +1,19 @@
+[Unit]
+Description=NDI Bridge Server (Multi-Component Control)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=catatumbo
+WorkingDirectory=/home/catatumbo/led_test
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/home/catatumbo/led_test/venv/bin/python3 bridge_server.py --no-browser
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+

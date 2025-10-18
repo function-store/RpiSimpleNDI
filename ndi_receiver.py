@@ -97,6 +97,11 @@ Examples:
         action='store_true',
         help='Disable automatic switching to new sources with matching suffix'
     )
+    ndi_group.add_argument(
+        '--lock',
+        action='store_true',
+        help='Start with source locked (prevents automatic source switching)'
+    )
     
     # Web server options
     web_group = parser.add_argument_group('Web Interface Options')
@@ -116,6 +121,18 @@ Examples:
         type=int,
         default=8080,
         help='WebSocket server port (default: 8080)'
+    )
+    web_group.add_argument(
+        '--component-id',
+        type=str,
+        default=None,
+        help='Unique component ID for bridge mode (default: auto-generated from hostname)'
+    )
+    web_group.add_argument(
+        '--component-name',
+        type=str,
+        default=None,
+        help='Human-readable component name for bridge mode (default: derived from config name)'
     )
     
     # Display options
@@ -172,19 +189,18 @@ Examples:
         help='Process priority (-20 to 19, negative = higher priority, requires sudo)'
     )
     
-    # Server options (for future use)
-    server_group = parser.add_argument_group('Server Options (Future)')
-    server_group.add_argument(
-        '--server',
+    # Bridge options
+    bridge_group = parser.add_argument_group('Bridge Options')
+    bridge_group.add_argument(
+        '--bridge-url',
         type=str,
         default=None,
-        help='WebSocket server URL (e.g., ws://server:8080)'
+        help='Bridge server URL for multi-component setup (e.g., ws://bridge-server:8081)'
     )
-    server_group.add_argument(
-        '--server-token',
-        type=str,
-        default=None,
-        help='Authentication token for server'
+    bridge_group.add_argument(
+        '--bridge-only',
+        action='store_true',
+        help='Connect only to bridge (no local web server)'
     )
     
     # General options
@@ -330,7 +346,7 @@ Examples:
     else:
         content_pos_name = content_pos if isinstance(content_pos, str) else None
     
-    # Initialize display handler
+    # Initialize display handler (with auto-reconnection)
     try:
         display = DisplayHandler(
             display_resolution=display_resolution,
@@ -341,11 +357,17 @@ Examples:
             rotation=rotation,
             scaling=scaling,
             show_fps=show_fps,
-            video_driver=video_driver
+            video_driver=video_driver,
+            retry_interval=5,  # Retry every 5 seconds
+            max_retries=-1  # Infinite retries
         )
-        logger.info(f"Display initialized")
+        if display.is_display_available():
+            logger.info(f"Display initialized successfully")
+        else:
+            logger.warning(f"Display not available - will auto-reconnect when available")
+            logger.info(f"Web server and NDI reception will continue to work")
     except Exception as e:
-        logger.error(f"Failed to initialize display: {e}")
+        logger.error(f"Failed to initialize display handler: {e}")
         return 1
     
     # Initialize NDI handler
@@ -370,39 +392,44 @@ Examples:
             color_format=args.color_format,
             auto_switch=not args.no_auto_switch
         )
+        
+        # Apply lock flag if specified
+        if args.lock:
+            ndi.set_locked(True)
+            logger.info("Source switching locked via --lock flag")
     except Exception as e:
         logger.error(f"Failed to initialize NDI: {e}")
         display.cleanup()
         return 1
     
     # Find and connect to NDI source
+    ndi_connected = False
     try:
         logger.info("Searching for NDI sources...")
-        if not ndi.connect():
-            logger.error("Failed to connect to NDI source")
-            display.cleanup()
-            return 1
-        
-        logger.info(f"Connected to: {ndi.get_source_name()}")
+        if ndi.connect():
+            logger.info(f"Connected to: {ndi.get_source_name()}")
+            ndi_connected = True
+        else:
+            logger.warning("No NDI sources available - will retry during operation")
+            logger.info("Web server will still work for monitoring")
     except Exception as e:
-        logger.error(f"NDI connection error: {e}")
-        display.cleanup()
-        return 1
+        logger.warning(f"NDI connection error: {e} - will retry during operation")
+        ndi_connected = False
     
-    # Initialize web server if requested
+    # Initialize web extension and/or bridge client if requested
     web_extension = None
     websocket_server = None
     http_server_thread = None
+    bridge_client = None
     
-    if args.web_server:
+    if args.web_server or args.bridge_url:
         try:
             from src.ndi_receiver_ext import NDIReceiverExt
-            from src.websocket_server import start_websocket_server
             import subprocess
             import threading
             import os
             
-            logger.info("Initializing web interface...")
+            logger.info("Initializing web extension...")
             
             # Determine receiver name
             receiver_name = "NDI Receiver"  # Default
@@ -414,45 +441,77 @@ Examples:
                 # Convert config.led_screen -> LED Screen
                 receiver_name = base_name.replace('config.', '').replace('_', ' ').title()
             
+            # Get bridge settings
+            # Priority: CLI args > config > defaults
+            bridge_config = config.get('bridge', {}) if config else {}
+            
+            # Bridge URL: CLI arg > config > None
+            bridge_url = args.bridge_url or (bridge_config.get('url') if bridge_config.get('enabled') else None)
+            
+            component_id = args.component_id or bridge_config.get('component_id')  # None = auto-generate in extension
+            component_name = args.component_name or bridge_config.get('component_name') or receiver_name
+            
             # Create extension
-            web_extension = NDIReceiverExt(ndi, display, receiver_name=receiver_name)
-            logger.info(f"✓ Web extension initialized (name: '{receiver_name}')")
+            web_extension = NDIReceiverExt(
+                ndi, 
+                display, 
+                receiver_name=receiver_name,
+                component_id=component_id,
+                component_name=component_name
+            )
+            logger.info(f"✓ Web extension initialized (name: '{receiver_name}', component_id: '{web_extension.component_id}')")
             
-            # Start WebSocket server
-            websocket_server = start_websocket_server(web_extension, port=args.websocket_port)
-            logger.info(f"✓ WebSocket server started on port {args.websocket_port}")
-            
-            # Start HTTP server for web interface
-            def run_http_server():
-                try:
-                    cmd = [
-                        'python3', 'start_server.py',
-                        '--port', str(args.web_port),
-                        '--websocket-port', str(args.websocket_port),
-                        '--no-browser'
-                    ]
-                    subprocess.run(cmd, cwd='/home/catatumbo/led_test')
-                except Exception as e:
-                    logger.error(f"HTTP server error: {e}")
-            
-            http_server_thread = threading.Thread(target=run_http_server, daemon=True)
-            http_server_thread.start()
-            logger.info(f"✓ HTTP server started on port {args.web_port}")
-            
-            # Start background state broadcaster (non-blocking)
-            def broadcast_state_updates():
-                import time
-                while True:
-                    time.sleep(10)  # Broadcast every 10 seconds
+            # Start local web server (unless bridge-only mode)
+            if args.web_server and not args.bridge_only:
+                from src.websocket_server import start_websocket_server
+                
+                # Start WebSocket server
+                websocket_server = start_websocket_server(web_extension, port=args.websocket_port)
+                logger.info(f"✓ WebSocket server started on port {args.websocket_port}")
+                
+                # Start HTTP server for web interface
+                def run_http_server():
                     try:
-                        if web_extension and hasattr(web_extension, 'webHandler'):
-                            web_extension.webHandler.broadcastStateUpdate()
+                        cmd = [
+                            'python3', 'start_server.py',
+                            '--port', str(args.web_port),
+                            '--websocket-port', str(args.websocket_port),
+                            '--no-browser'
+                        ]
+                        subprocess.run(cmd, cwd='/home/catatumbo/led_test')
                     except Exception as e:
-                        logger.debug(f"Error broadcasting state: {e}")
+                        logger.error(f"HTTP server error: {e}")
+                
+                http_server_thread = threading.Thread(target=run_http_server, daemon=True)
+                http_server_thread.start()
+                logger.info(f"✓ HTTP server started on port {args.web_port}")
+                
+                # Start background state broadcaster for local clients
+                def broadcast_state_updates():
+                    import time
+                    while True:
+                        time.sleep(10)  # Broadcast every 10 seconds
+                        try:
+                            if web_extension and hasattr(web_extension, 'webHandler'):
+                                web_extension.webHandler.broadcastStateUpdate()
+                        except Exception as e:
+                            logger.debug(f"Error broadcasting state: {e}")
+                
+                broadcast_thread = threading.Thread(target=broadcast_state_updates, daemon=True)
+                broadcast_thread.start()
+                logger.info(f"✓ State broadcast thread started")
             
-            broadcast_thread = threading.Thread(target=broadcast_state_updates, daemon=True)
-            broadcast_thread.start()
-            logger.info(f"✓ State broadcast thread started")
+            # Connect to bridge server if URL provided
+            if bridge_url:
+                from src.server_handler import BridgeClientHandler
+                
+                bridge_client = BridgeClientHandler(bridge_url, web_extension)
+                bridge_client.start()
+                logger.info(f"✓ Bridge client connecting to {bridge_url}")
+                
+                # Attach bridge client to web extension for state updates
+                if hasattr(web_extension, 'webHandler'):
+                    web_extension.webHandler.bridge_client = bridge_client
             
             logger.info("")
             logger.info("=" * 60)
@@ -477,11 +536,41 @@ Examples:
         frame_count = 0
         start_time = time.time()
         last_fps_report = start_time
+        last_ndi_retry = 0
         fps_report_interval = 10  # Report FPS every 10 seconds
+        ndi_retry_interval = 5  # Retry NDI connection every 5 seconds
         
         while True:
-            # Get NDI frame
-            frame = ndi.receive_frame()
+            # Try to connect to NDI if not connected
+            if not ndi_connected:
+                now = time.time()
+                if now - last_ndi_retry >= ndi_retry_interval:
+                    last_ndi_retry = now
+                    logger.debug("Attempting NDI reconnection...")
+                    try:
+                        if ndi.connect():
+                            logger.info(f"✓ NDI connected to: {ndi.get_source_name()}")
+                            ndi_connected = True
+                    except Exception as e:
+                        logger.debug(f"NDI reconnection failed: {e}")
+                
+                # Sleep a bit if not connected to avoid busy loop
+                if not ndi_connected:
+                    time.sleep(0.1)
+                    # Still check for exit even without NDI
+                    if display.should_exit():
+                        logger.info("Exit requested")
+                        break
+                    continue
+            
+            # Get NDI frame (only if connected)
+            try:
+                frame = ndi.receive_frame()
+            except Exception as e:
+                logger.warning(f"Error receiving frame: {e}")
+                ndi_connected = False
+                last_ndi_retry = time.time()
+                continue
             
             if frame is not None:
                 frame_count += 1
@@ -516,7 +605,10 @@ Examples:
     finally:
         # Cleanup
         logger.info("Cleaning up...")
-        ndi.disconnect()
+        try:
+            ndi.disconnect()
+        except:
+            pass
         display.cleanup()
     
     logger.info("Shutdown complete")

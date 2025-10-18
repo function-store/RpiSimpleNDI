@@ -12,7 +12,7 @@ logger = logging.getLogger('ndi_receiver.display')
 
 
 class DisplayHandler:
-    """Handles display initialization and frame rendering"""
+    """Handles display initialization and frame rendering with auto-reconnection"""
     
     POSITIONS = {
         'center': lambda w, h, sw, sh: ((sw - w) // 2, (sh - h) // 2),
@@ -34,7 +34,10 @@ class DisplayHandler:
         video_driver: str = 'auto',
         # Legacy parameters for backwards compatibility
         resolution: Optional[Tuple[int, int]] = None,
-        position: Optional[str] = None
+        position: Optional[str] = None,
+        # Reconnection settings
+        retry_interval: int = 5,
+        max_retries: int = -1  # -1 = infinite retries
     ):
         """
         Initialize display handler
@@ -48,11 +51,14 @@ class DisplayHandler:
             scaling: Scaling mode ('fit', 'fill', 'none', 'stretch')
             show_fps: Show FPS counter
             video_driver: SDL video driver to use
+            retry_interval: Seconds between reconnection attempts
+            max_retries: Maximum reconnection attempts (-1 = infinite)
         """
         # Handle legacy parameters
         if resolution and not display_resolution:
             display_resolution = resolution
         
+        # Store all parameters for reconnection
         self.display_resolution = display_resolution
         self.content_resolution = content_resolution
         self.content_position = content_position
@@ -61,6 +67,16 @@ class DisplayHandler:
         self.rotation = rotation
         self.scaling = scaling
         self.show_fps = show_fps
+        self.video_driver = video_driver
+        self.retry_interval = retry_interval
+        self.max_retries = max_retries
+        
+        # Display state tracking
+        self.screen = None
+        self.screen_size = None
+        self.display_available = False
+        self.last_retry_time = 0
+        self.retry_count = 0
         
         # Initialize video driver
         if video_driver != 'auto':
@@ -69,44 +85,14 @@ class DisplayHandler:
         else:
             self._detect_video_driver()
         
-        # Initialize pygame
-        pygame.init()
-        
-        # Create display
-        flags = pygame.FULLSCREEN if fullscreen else 0
-        
-        try:
-            if display_resolution:
-                self.screen = pygame.display.set_mode(display_resolution, flags)
-                logger.info(f"Display created: {display_resolution[0]}x{display_resolution[1]}")
-            else:
-                # Auto-detect display size
-                self.screen = pygame.display.set_mode((0, 0), flags)
-                detected_size = self.screen.get_size()
-                logger.info(f"Display auto-detected: {detected_size[0]}x{detected_size[1]}")
-        except pygame.error as e:
-            logger.error(f"Failed to create display: {e}")
-            raise
-        
-        pygame.display.set_caption("LED Receiver")
-        pygame.mouse.set_visible(False)
-        
-        self.clock = pygame.time.Clock()
-        self.screen_size = self.screen.get_size()
-        
-        logger.info(f"Configuration: display={self.screen_size}, content_res={content_resolution}, position={content_position}, rotation={rotation}°, scaling={scaling}")
-        
-        # FPS tracking
+        # FPS tracking - initialize before display
         self.frame_count = 0
         self.last_fps_time = time.time()
         self.current_fps = 0.0
         self.source_fps = 0.0
         
-        # Font for FPS display
-        if show_fps:
-            self.font = pygame.font.Font(None, 36)
-        else:
-            self.font = None
+        # Font for FPS display - initialize to None before display init
+        self.font = None
         
         # Pre-calculate fixed position if possible (optimization)
         self._fixed_position = None
@@ -120,7 +106,96 @@ class DisplayHandler:
         self._needs_scaling = (content_resolution is not None and scaling != 'none') or (scaling in ['fill', 'stretch'])
         self._dynamic_fit = (scaling == 'fit')
         
-        logger.info(f"Display initialized (rotation: {rotation}°, scaling: {scaling}, optimized: {not self._needs_rotation and not self._needs_scaling})")
+        # Try to initialize display
+        self._initialize_display()
+        
+        # Initialize font after display (if display available)
+        if show_fps and self.display_available:
+            try:
+                self.font = pygame.font.Font(None, 36)
+            except:
+                pass
+        
+        logger.info(f"Configuration: display={self.screen_size}, content_res={content_resolution}, position={content_position}, rotation={rotation}°, scaling={scaling}")
+        
+        if self.display_available:
+            logger.info(f"Display initialized (rotation: {rotation}°, scaling: {scaling}, optimized: {not self._needs_rotation and not self._needs_scaling})")
+        else:
+            logger.warning(f"Display not available - will retry every {retry_interval}s")
+    
+    def _initialize_display(self) -> bool:
+        """
+        Initialize or reinitialize the display
+        Returns True if successful, False otherwise
+        """
+        try:
+            # Initialize pygame if not already done
+            if not pygame.get_init():
+                pygame.init()
+            
+            # Create display
+            flags = pygame.FULLSCREEN if self.fullscreen else 0
+            
+            if self.display_resolution:
+                self.screen = pygame.display.set_mode(self.display_resolution, flags)
+                logger.info(f"Display created: {self.display_resolution[0]}x{self.display_resolution[1]}")
+            else:
+                # Auto-detect display size
+                self.screen = pygame.display.set_mode((0, 0), flags)
+                detected_size = self.screen.get_size()
+                logger.info(f"Display auto-detected: {detected_size[0]}x{detected_size[1]}")
+            
+            pygame.display.set_caption("LED Receiver")
+            pygame.mouse.set_visible(False)
+            
+            self.clock = pygame.time.Clock()
+            self.screen_size = self.screen.get_size()
+            self.display_available = True
+            self.retry_count = 0
+            
+            # Reinitialize font if needed
+            if self.show_fps and not self.font:
+                try:
+                    self.font = pygame.font.Font(None, 36)
+                except:
+                    pass
+            
+            return True
+            
+        except pygame.error as e:
+            self.display_available = False
+            self.screen = None
+            self.screen_size = None
+            
+            # Only log full error on first failure or every 10th retry
+            if self.retry_count == 0 or self.retry_count % 10 == 0:
+                logger.warning(f"Display not available (attempt {self.retry_count + 1}): {e}")
+            
+            return False
+    
+    def _try_reconnect_display(self):
+        """Try to reconnect to display if enough time has passed"""
+        now = time.time()
+        
+        # Check if it's time to retry
+        if now - self.last_retry_time < self.retry_interval:
+            return
+        
+        # Check retry limit
+        if self.max_retries > 0 and self.retry_count >= self.max_retries:
+            return
+        
+        self.last_retry_time = now
+        self.retry_count += 1
+        
+        logger.debug(f"Attempting display reconnection (attempt {self.retry_count})...")
+        
+        if self._initialize_display():
+            logger.info(f"✓ Display reconnected successfully after {self.retry_count} attempts")
+        
+    def is_display_available(self) -> bool:
+        """Check if display is currently available"""
+        return self.display_available
     
     def _detect_video_driver(self):
         """Auto-detect best video driver"""
@@ -151,7 +226,32 @@ class DisplayHandler:
         
         self.source_fps = source_fps
         
-        # Create surface from frame data
+        # If display is not available, try to reconnect
+        if not self.display_available:
+            self._try_reconnect_display()
+            # If still not available, skip rendering but still process FPS
+            if not self.display_available:
+                self._update_fps_counter()
+                return
+        
+        # Wrap display operations in try/except to catch disconnection
+        try:
+            self._render_frame(raw_data, width, height)
+        except pygame.error as e:
+            logger.warning(f"Display error (disconnected?): {e}")
+            self.display_available = False
+            self.last_retry_time = time.time()
+            return
+    
+    def _render_frame(self, raw_data: bytes, width: int, height: int):
+        """
+        Internal method to render a frame to the display
+        
+        Args:
+            raw_data: Frame pixel data
+            width: Frame width
+            height: Frame height
+        """
         # Calculate expected buffer size for RGBA (4 bytes per pixel)
         expected_size = width * height * 4
         actual_size = len(raw_data)
@@ -286,12 +386,19 @@ class DisplayHandler:
     
     def _process_events(self):
         """Process pygame events"""
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self._exit_requested = True
-            elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_ESCAPE, pygame.K_q):
+        if not self.display_available:
+            return
+        
+        try:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
                     self._exit_requested = True
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_ESCAPE, pygame.K_q):
+                        self._exit_requested = True
+        except pygame.error:
+            # Display disconnected during event processing
+            self.display_available = False
     
     def should_exit(self) -> bool:
         """Check if exit was requested"""
@@ -299,7 +406,11 @@ class DisplayHandler:
     
     def cleanup(self):
         """Cleanup display resources"""
-        if pygame.get_init():
-            pygame.quit()
-            logger.info("Display cleaned up")
+        try:
+            if pygame.get_init():
+                pygame.quit()
+                logger.info("Display cleaned up")
+        except:
+            # Ignore cleanup errors
+            pass
 

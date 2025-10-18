@@ -1,149 +1,219 @@
 """
-Server Handler - WebSocket communication with control server
-TO BE IMPLEMENTED
+Bridge Client Handler - WebSocket client for connecting to bridge server
 
-This module will handle:
-- WebSocket connection to control server
-- Authentication
-- Receiving commands (source selection, display settings, etc.)
-- Sending status updates (FPS, connection status, etc.)
-- Heartbeat/keepalive
+This module handles connection to the NDI Named Router bridge server,
+allowing the Raspberry Pi receiver to be controlled alongside TouchDesigner
+instances through a unified web interface.
+
+Protocol:
+- Connects to bridge server as WebSocket client
+- Sends initial state on connection
+- Sends state updates when sources/locks change
+- Receives commands from bridge (routed from web browsers)
+- Executes commands locally (set_source, set_lock, etc.)
 """
 
+import asyncio
+import websockets
+import json
 import logging
-from typing import Optional, Callable
+import threading
+import time
+from typing import Optional
 
-logger = logging.getLogger('ndi_receiver.server')
+logger = logging.getLogger('ndi_receiver.bridge_client')
 
 
-class ServerHandler:
-    """Handles WebSocket communication with control server"""
+class BridgeClientHandler:
+    """WebSocket client for connecting to bridge server"""
     
-    def __init__(
-        self,
-        server_url: str,
-        auth_token: Optional[str] = None,
-        on_command: Optional[Callable] = None
-    ):
+    def __init__(self, bridge_url: str, extension):
         """
-        Initialize server handler
+        Initialize bridge client
         
         Args:
-            server_url: WebSocket server URL (e.g., ws://server:8080)
-            auth_token: Authentication token
-            on_command: Callback for received commands
+            bridge_url: WebSocket bridge URL (e.g., ws://server:8081)
+            extension: NDIReceiverExt instance for state and commands
         """
-        self.server_url = server_url
-        self.auth_token = auth_token
-        self.on_command = on_command
+        self.bridge_url = bridge_url
+        self.extension = extension
+        self.websocket = None
         self.connected = False
+        self.running = False
+        self.reconnect_delay = 5  # seconds
+        self.thread = None
+        self.loop = None
         
-        logger.info(f"Server handler initialized (URL: {server_url})")
+        logger.info(f"Bridge client initialized (URL: {bridge_url})")
     
-    def connect(self) -> bool:
-        """
-        Connect to WebSocket server
+    def start(self):
+        """Start bridge client in background thread"""
+        if self.running:
+            logger.warning("Bridge client already running")
+            return
         
-        Returns:
-            True if connected successfully
-        """
-        logger.info("Connecting to server...")
-        # TODO: Implement WebSocket connection
-        # Suggested library: websockets or python-socketio
-        
-        # Example structure:
-        # import websockets
-        # self.ws = await websockets.connect(self.server_url)
-        # await self.authenticate()
-        
-        logger.warning("Server connection not yet implemented")
-        return False
+        self.running = True
+        self.thread = threading.Thread(target=self._run_client, daemon=True)
+        self.thread.start()
+        logger.info("Bridge client thread started")
     
-    def disconnect(self):
-        """Disconnect from server"""
-        if self.connected:
-            logger.info("Disconnecting from server...")
-            # TODO: Close WebSocket connection
-            self.connected = False
+    def stop(self):
+        """Stop bridge client"""
+        logger.info("Stopping bridge client...")
+        self.running = False
+        
+        if self.loop and self.websocket:
+            # Schedule close in the event loop
+            asyncio.run_coroutine_threadsafe(self.websocket.close(), self.loop)
+        
+        if self.thread:
+            self.thread.join(timeout=5)
+        
+        logger.info("Bridge client stopped")
     
-    def send_status(self, status: dict):
-        """
-        Send status update to server
+    def _run_client(self):
+        """Run client event loop (runs in separate thread)"""
+        try:
+            asyncio.run(self._client_loop())
+        except Exception as e:
+            logger.error(f"Bridge client error: {e}")
+    
+    async def _client_loop(self):
+        """Main client loop with auto-reconnect"""
+        self.loop = asyncio.get_running_loop()
+        
+        while self.running:
+            try:
+                logger.info(f"Connecting to bridge: {self.bridge_url}")
+                async with websockets.connect(
+                    self.bridge_url,
+                    ping_interval=20,
+                    ping_timeout=10
+                ) as websocket:
+                    self.websocket = websocket
+                    self.connected = True
+                    logger.info("Connected to bridge server")
+                    
+                    # Send initial state
+                    await self._send_initial_state()
+                    
+                    # Handle messages
+                    async for message in websocket:
+                        await self._handle_message(message)
+                        
+            except websockets.exceptions.ConnectionClosed:
+                logger.warning("Bridge connection closed")
+                self.connected = False
+            except Exception as e:
+                logger.error(f"Bridge connection error: {e}")
+                self.connected = False
+            
+            # Reconnect after delay
+            if self.running:
+                logger.info(f"Reconnecting in {self.reconnect_delay} seconds...")
+                await asyncio.sleep(self.reconnect_delay)
+        
+        self.connected = False
+    
+    async def _send_initial_state(self):
+        """Send initial state to bridge on connection"""
+        try:
+            if not self.extension:
+                logger.error("No extension available")
+                return
+            
+            state = self.extension.getCurrentState()
+            message = {
+                'action': 'state_update',
+                'state': state
+            }
+            await self.websocket.send(json.dumps(message))
+            logger.info("Sent initial state to bridge")
+        except Exception as e:
+            logger.error(f"Failed to send initial state: {e}")
+    
+    async def _handle_message(self, message: str):
+        """Handle incoming message from bridge
         
         Args:
-            status: Status dictionary (fps, source, etc.)
+            message: JSON message string
         """
-        if not self.connected:
+        try:
+            data = json.loads(message)
+            action = data.get('action')
+            
+            logger.debug(f"Received from bridge: {action}")
+            
+            # Handle commands by delegating to webHandler
+            if hasattr(self.extension, 'webHandler'):
+                # Process in main thread context (webHandler expects this)
+                self.extension.webHandler.handleMessage(None, message)
+            else:
+                logger.error("No webHandler available to process bridge command")
+                
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON from bridge: {e}")
+        except Exception as e:
+            logger.error(f"Error handling bridge message: {e}")
+    
+    def broadcast_state_update(self):
+        """Send state update to bridge (called when state changes locally)"""
+        if not self.connected or not self.websocket or not self.loop:
             return
         
-        # TODO: Send status via WebSocket
-        # Example: await self.ws.send(json.dumps(status))
-        pass
+        try:
+            state = self.extension.getCurrentState()
+            message = json.dumps({
+                'action': 'state_update',
+                'state': state
+            })
+            
+            # Schedule send in event loop
+            asyncio.run_coroutine_threadsafe(
+                self.websocket.send(message),
+                self.loop
+            )
+            logger.debug("Sent state update to bridge")
+        except Exception as e:
+            logger.error(f"Failed to send state update to bridge: {e}")
     
-    def send_heartbeat(self):
-        """Send heartbeat to server"""
-        if not self.connected:
+    def broadcast_source_change(self, block_idx: int, source_name: str):
+        """Send source change notification to bridge
+        
+        Args:
+            block_idx: Output block index
+            source_name: New source name
+        """
+        if not self.connected or not self.websocket or not self.loop:
             return
         
-        # TODO: Send heartbeat message
-        pass
+        try:
+            message = json.dumps({
+                'action': 'source_changed',
+                'block_idx': block_idx,
+                'source_name': source_name
+            })
+            
+            # Schedule send in event loop
+            asyncio.run_coroutine_threadsafe(
+                self.websocket.send(message),
+                self.loop
+            )
+            logger.debug(f"Sent source change to bridge: {source_name}")
+        except Exception as e:
+            logger.error(f"Failed to send source change to bridge: {e}")
     
-    def receive_command(self) -> Optional[dict]:
-        """
-        Receive command from server
+    def is_connected(self) -> bool:
+        """Check if connected to bridge
         
         Returns:
-            Command dictionary or None
+            bool: True if connected
         """
-        if not self.connected:
-            return None
-        
-        # TODO: Receive and parse command
-        # Example: message = await self.ws.recv()
-        # command = json.loads(message)
-        
-        return None
-    
-    def authenticate(self) -> bool:
-        """
-        Authenticate with server
-        
-        Returns:
-            True if authenticated successfully
-        """
-        if not self.auth_token:
-            logger.warning("No authentication token provided")
-            return False
-        
-        # TODO: Send authentication message
-        # Example: await self.ws.send(json.dumps({'token': self.auth_token}))
-        
-        return False
+        return self.connected
 
 
-# Suggested implementation approach:
-#
-# 1. Install websocket library:
-#    pip install websockets
-#    or
-#    pip install python-socketio
-#
-# 2. Implement async event loop in main application
-#
-# 3. Define command protocol (JSON):
-#    Commands from server:
-#    - {"cmd": "set_source", "source": "name"}
-#    - {"cmd": "set_resolution", "width": 320, "height": 320}
-#    - {"cmd": "set_rotation", "angle": 180}
-#    - {"cmd": "reconnect"}
-#    - {"cmd": "shutdown"}
-#
-#    Status updates to server:
-#    - {"type": "status", "fps": 60.0, "source": "name", "frames": 1000}
-#    - {"type": "heartbeat", "timestamp": 1234567890}
-#    - {"type": "error", "message": "..."}
-#
-# 4. Thread-safe command queue for communication between
-#    WebSocket thread and main display loop
+
+
+
 
 

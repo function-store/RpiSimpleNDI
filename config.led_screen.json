@@ -27,9 +27,19 @@
     "priority": -10
   },
   
+  "bridge": {
+    "enabled": false,
+    "url": null,
+    "component_id": null,
+    "component_name": "LED Screen"
+  },
+  
   "logging": {
     "level": "INFO"
   }
 }
+
+
+
 
 

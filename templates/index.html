@@ -256,6 +256,80 @@
         .recall-button:hover {
             box-shadow: 0 8px 25px rgba(214, 158, 46, 0.4);
         }
+        
+        .lock-button {
+            background: none;
+            border: 2px solid #718096;
+            color: #718096;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .lock-button:hover {
+            border-color: #a0aec0;
+            color: #a0aec0;
+            transform: scale(1.05);
+        }
+        
+        .lock-button.locked {
+            background: linear-gradient(45deg, #ed8936, #f6ad55);
+            border-color: #dd6b20;
+            color: white;
+        }
+        
+        .lock-button.locked:hover {
+            box-shadow: 0 4px 15px rgba(237, 137, 54, 0.5);
+        }
+        
+        .block-card.locked {
+            border-color: #ed8936;
+            background: linear-gradient(135deg, #2d3748 0%, #3a4556 100%);
+        }
+        
+        .block-card.locked .block-title::before {
+            content: "🔒 ";
+            color: #f6ad55;
+        }
+        
+        .block-card.locked select {
+            border-color: #ed8936;
+        }
+        
+        .global-lock-button {
+            background: linear-gradient(45deg, #805ad5, #6b46c1);
+            border: 2px solid #805ad5;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 5px 15px rgba(128, 90, 213, 0.3);
+        }
+        
+        .global-lock-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(128, 90, 213, 0.4);
+        }
+        
+        .global-lock-button.locked {
+            background: linear-gradient(45deg, #ed8936, #f6ad55);
+            border-color: #dd6b20;
+        }
+        
+        .global-lock-button.locked:hover {
+            box-shadow: 0 8px 25px rgba(237, 137, 54, 0.5);
+        }
 
         .notification {
             position: fixed;
@@ -374,6 +448,10 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h2>Source Controls</h2>
                     <div class="control-buttons">
+                        <button class="global-lock-button" id="globalLockButton" onclick="toggleGlobalLock()">
+                            <span id="globalLockIcon">🔓</span>
+                            <span id="globalLockText">Global Lock</span>
+                        </button>
                         <button class="refresh-button" onclick="refreshSources()">Refresh Sources</button>
                         <button class="refresh-button save-button" onclick="saveConfiguration()">Save Config</button>
                         <button class="refresh-button recall-button" onclick="recallConfiguration()">Recall Config</button>
@@ -404,7 +482,7 @@
         
         // Use the same host as the web page for WebSocket connection
         const WS_HOST = window.location.hostname;
-        const WS_PORT = '8080';  // TouchDesigner WebSocket DAT port
+        const WS_PORT = '8080';  // TouchDesigner WebSocket DAT port (direct connection)
         const WS_URL = `ws://${WS_HOST}:${WS_PORT}`;
         
         console.log(`WebSocket URL: ${WS_URL}`);
@@ -461,7 +539,12 @@
         }
 
         function handleMessage(data) {
+            console.log('Handling message:', data);
+            
             if (data.action === 'state_update') {
+                console.log('Received state update:', data.state);
+                console.log('Output names:', data.state.output_names);
+                console.log('Sources:', data.state.sources);
                 currentState = data.state;
                 updateUI();
             } else if (data.action === 'source_changed') {
@@ -503,30 +586,94 @@
             }
         }
 
+        function getComponentForBlock(blockIdx) {
+            // Map block index to component info
+            if (!currentState.components) return null;
+            
+            for (const component of currentState.components) {
+                if (blockIdx >= component.output_start_idx && 
+                    blockIdx < component.output_start_idx + component.output_count) {
+                    return component;
+                }
+            }
+            return null;
+        }
+        
         function updateUI() {
+            console.log('Updating UI with current state:', currentState);
             const container = document.getElementById('blocksContainer');
             const lastUpdateElement = document.getElementById('lastUpdate');
             
+            console.log('Output names check:', currentState.output_names);
+            console.log('Output names length:', currentState.output_names ? currentState.output_names.length : 'undefined');
+            console.log('Components:', currentState.components);
+            
             if (!currentState.output_names || currentState.output_names.length === 0) {
+                console.log('No output names found, showing "No source blocks configured" message');
                 container.innerHTML = '<div class="loading">No source blocks configured</div>';
                 return;
             }
 
             let html = '';
+            let currentComponentId = null;
             
             for (let i = 0; i < currentState.output_names.length; i++) {
+                const component = getComponentForBlock(i);
+                
+                // Add component header if this is a new component
+                if (component && component.component_id !== currentComponentId) {
+                    if (currentComponentId !== null) {
+                        html += '</div>'; // Close previous component section
+                    }
+                    currentComponentId = component.component_id;
+                    html += `
+                        <div style="grid-column: 1 / -1; margin-top: 20px;">
+                            <h3 style="color: #63b3ed; font-size: 1.3em; padding: 10px; border-bottom: 2px solid #63b3ed;">
+                                📡 ${component.component_name}
+                                ${component.lock_global ? '<span style="color: #ed8936;">🔒 Locked</span>' : ''}
+                            </h3>
+                        </div>
+                    `;
+                }
                 const outputName = currentState.output_names[i] || `Block ${i + 1}`;
                 const regexPattern = currentState.regex_patterns[i] || 'No pattern';
                 const currentSource = currentState.current_sources[i] || '';
                 const resolution = currentState.output_resolutions && currentState.output_resolutions[i] ? currentState.output_resolutions[i] : [0, 0];
                 const resolutionText = resolution[0] > 0 && resolution[1] > 0 ? `${resolution[0]} × ${resolution[1]}` : 'Not set';
+                const isIndividuallyLocked = currentState.locks && currentState.locks[i] ? true : false;
+                const isGloballyLocked = currentState.lock_global ? true : false;
+                const isEffectivelyLocked = isGloballyLocked || isIndividuallyLocked;
+                
+                // Determine lock button appearance
+                let lockButtonClass = '';
+                let lockButtonTitle = '';
+                let lockIcon = '🔓';
+                
+                if (isGloballyLocked) {
+                    lockButtonClass = 'locked';
+                    lockIcon = '🔒';
+                    lockButtonTitle = 'Globally locked - unlock Global Lock first';
+                } else if (isIndividuallyLocked) {
+                    lockButtonClass = 'locked';
+                    lockIcon = '🔒';
+                    lockButtonTitle = 'Unlock to enable auto-routing';
+                } else {
+                    lockButtonTitle = 'Lock to disable auto-routing';
+                }
+                
+                const componentId = component ? component.component_id : null;
+                const localBlockIdx = component ? (i - component.output_start_idx) : i;
                 
                 html += `
-                    <div class="block-card">
+                    <div class="block-card ${isEffectivelyLocked ? 'locked' : ''}" data-component="${componentId}" data-block="${localBlockIdx}">
                         <div class="block-header">
                             <div class="block-title">${outputName}</div>
-                            <div class="regex-pattern">${regexPattern}</div>
+                            <button class="lock-button ${lockButtonClass}" onclick="toggleLock(${i}, '${componentId}', ${localBlockIdx})" title="${lockButtonTitle}" ${isGloballyLocked ? 'style="opacity: 0.6; cursor: not-allowed;"' : ''}>
+                                ${lockIcon}
+                            </button>
                         </div>
+                        
+                        <div class="regex-pattern">${regexPattern}</div>
                         
                         <div class="resolution-info">
                             <span class="resolution-label">Resolution:</span>
@@ -535,7 +682,7 @@
                         
                         <div class="source-selector">
                             <label for="source-${i}">Select NDI Source:</label>
-                            <select id="source-${i}" onchange="setSource(${i}, this.value)">
+                            <select id="source-${i}" onchange="setSource(${i}, this.value, '${componentId}', ${localBlockIdx})">
                                 <option value="">-- Select Source --</option>
                                 ${currentState.sources.map(source => 
                                     `<option value="${source}" ${source === currentSource ? 'selected' : ''}>${source}</option>`
@@ -543,11 +690,31 @@
                             </select>
                         </div>
                         
-                        <div class="current-source ${currentSource ? 'clickable' : 'empty'}" ${currentSource ? `onclick="setSource(${i}, '${currentSource}')" title="Click to refresh this source connection"` : ''}>
+                        <div class="current-source ${currentSource ? 'clickable' : 'empty'}" ${currentSource ? `onclick="setSource(${i}, '${currentSource}', '${componentId}', ${localBlockIdx})" title="Click to refresh this source connection"` : ''}>
                             Current: ${currentSource || 'No source selected'}
                         </div>
                     </div>
                 `;
+            }
+            
+            if (currentComponentId !== null) {
+                html += '</div>'; // Close last component section
+            }
+            
+            // Update global lock button
+            const globalLockButton = document.getElementById('globalLockButton');
+            const globalLockIcon = document.getElementById('globalLockIcon');
+            const globalLockText = document.getElementById('globalLockText');
+            if (globalLockButton && currentState.lock_global !== undefined) {
+                if (currentState.lock_global) {
+                    globalLockButton.classList.add('locked');
+                    globalLockIcon.textContent = '🔒';
+                    globalLockText.textContent = 'Unlock All';
+                } else {
+                    globalLockButton.classList.remove('locked');
+                    globalLockIcon.textContent = '🔓';
+                    globalLockText.textContent = 'Lock All';
+                }
             }
             
             container.innerHTML = html;
@@ -559,8 +726,8 @@
             }
         }
 
-        function setSource(blockIdx, sourceName) {
-            console.log(`Setting source for block ${blockIdx}: ${sourceName}`);
+        function setSource(blockIdx, sourceName, componentId, localBlockIdx) {
+            console.log(`Setting source for block ${blockIdx} (component: ${componentId}, local: ${localBlockIdx}): ${sourceName}`);
             
             // Check if this is a refresh of the current source
             const isRefresh = currentState.current_sources && 
@@ -571,9 +738,10 @@
                 showNotification(`Refreshing source: ${sourceName}`, 'success');
             }
             
-            sendMessage({
+            sendMessage({ 
                 action: 'set_source',
-                block_idx: blockIdx,
+                component_id: componentId,
+                block_idx: localBlockIdx,  // Use local block index within component
                 source_name: sourceName
             });
         }
@@ -591,6 +759,65 @@
         function recallConfiguration() {
             console.log('Recalling configuration');
             sendMessage({ action: 'recall_configuration' });
+        }
+        
+        function toggleLock(blockIdx, componentId, localBlockIdx) {
+            console.log(`Toggling lock for block ${blockIdx} (component: ${componentId}, local: ${localBlockIdx})`);
+            
+            const component = getComponentForBlock(blockIdx);
+            
+            // Don't allow toggling individual locks when component's global lock is enabled
+            if (component && component.lock_global) {
+                showNotification(`Unlock ${component.component_name} Global Lock first`, 'error');
+                return;
+            }
+            
+            const isCurrentlyLocked = currentState.locks && currentState.locks[blockIdx];
+            const newLockState = !isCurrentlyLocked;
+            
+            sendMessage({ 
+                action: 'set_lock',
+                component_id: componentId,
+                block_idx: localBlockIdx,  // Use local block index within component
+                locked: newLockState
+            });
+            
+            const lockStatus = newLockState ? 'locked' : 'unlocked';
+            const outputName = currentState.output_names[blockIdx] || `Block ${blockIdx + 1}`;
+            showNotification(`${outputName} ${lockStatus}`, 'success');
+        }
+        
+        function toggleGlobalLock() {
+            console.log('Toggling global lock for all components');
+            
+            // Toggle global lock for each component
+            if (currentState.components) {
+                for (const component of currentState.components) {
+                    const newLockState = !component.lock_global;
+                    
+                    sendMessage({ 
+                        action: 'set_lock_global',
+                        component_id: component.component_id,
+                        locked: newLockState
+                    });
+                }
+                
+                const newLockState = currentState.components.some(c => !c.lock_global);
+                const lockStatus = newLockState ? 'locked' : 'unlocked';
+                showNotification(`All components ${lockStatus}`, 'success');
+            } else {
+                // Fallback for single component (backward compatibility)
+                const isCurrentlyLocked = currentState.lock_global;
+                const newLockState = !isCurrentlyLocked;
+                
+                sendMessage({ 
+                    action: 'set_lock_global',
+                    locked: newLockState
+                });
+                
+                const lockStatus = newLockState ? 'locked' : 'unlocked';
+                showNotification(`All outputs ${lockStatus}`, 'success');
+            }
         }
 
         function showNotification(message, type = 'success') {

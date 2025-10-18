@@ -32,6 +32,14 @@
     "cpu_performance_mode": false,
     "priority": 0
   },
+  "bridge": {
+    "enabled": false,
+    "url": null,
+    "component_id": null,
+    "component_name": null,
+    "_comment": "Bridge mode settings for TD_NDI_NamedRouter integration",
+    "_info": "url: bridge server URL (e.g., ws://bridge-server:8081), component_id: unique ID (default: auto-generated from hostname), component_name: display name (default: from 'name' field)"
+  },
   "server": {
     "enabled": false,
     "url": "ws://localhost:8080",
