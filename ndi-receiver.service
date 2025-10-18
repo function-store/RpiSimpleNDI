@@ -9,7 +9,7 @@ User=catatumbo
 WorkingDirectory=/home/catatumbo/led_test
 Environment="PYTHONUNBUFFERED=1"
 Environment="XDG_RUNTIME_DIR=/run/user/1000"
-ExecStart=/usr/bin/python3 ndi_receiver.py --config config.led_screen.json
+ExecStart=/usr/bin/python3 ndi_receiver.py --config config.led_screen.json --bridge-url ws://localhost:8081
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal

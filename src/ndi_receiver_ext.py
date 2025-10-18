@@ -599,11 +599,16 @@ class WebHandler:
         else:
             debug('WARNING: Extension not found, cannot send initial state')
     
+    def _send_response(self, client, response):
+        """Helper to safely send responses only when client exists (not bridge mode)"""
+        if client and self.webServerDAT:
+            self.webServerDAT.send_message(client, json.dumps(response))
+    
     def handleMessage(self, client, message):
         """Handle incoming WebSocket messages
         
         Args:
-            client: WebSocket client identifier
+            client: WebSocket client identifier (None if called from bridge)
             message: JSON message string
             
         Adapted from NDINamedRouterExt.WebHandler.handleMessage()
@@ -618,7 +623,7 @@ class WebHandler:
                     'action': 'error',
                     'message': 'NDI Receiver extension not found'
                 }
-                self.webServerDAT.send_message(client, json.dumps(error_response))
+                self._send_response(client, error_response)
                 return
             
             if action == 'request_state':
@@ -628,7 +633,7 @@ class WebHandler:
                     'action': 'state_update',
                     'state': state
                 }
-                self.webServerDAT.send_message(client, json.dumps(response))
+                self._send_response(client, response)
                 debug('State response sent successfully')
             
             elif action == 'set_source':
@@ -648,7 +653,7 @@ class WebHandler:
                             'action': 'state_update',
                             'state': state
                         }
-                        self.webServerDAT.send_message(client, json.dumps(response))
+                        self._send_response(client, response)
                         debug('Updated state sent successfully')
                     else:
                         debug('Set source failed, sending error response')
@@ -656,14 +661,14 @@ class WebHandler:
                             'action': 'error',
                             'message': f'Failed to set source: {source_name}'
                         }
-                        self.webServerDAT.send_message(client, json.dumps(error_response))
+                        self._send_response(client, error_response)
                 else:
                     debug('Invalid set_source parameters, sending error response')
                     error_response = {
                         'action': 'error',
                         'message': 'Invalid set_source parameters'
                     }
-                    self.webServerDAT.send_message(client, json.dumps(error_response))
+                    self._send_response(client, error_response)
             
             elif action == 'refresh_sources':
                 debug('Processing refresh_sources action')
@@ -677,7 +682,7 @@ class WebHandler:
                         'action': 'state_update',
                         'state': state
                     }
-                    self.webServerDAT.send_message(client, json.dumps(response))
+                    self._send_response(client, response)
                     debug('Refreshed state sent successfully')
                 else:
                     debug('Refresh sources failed, sending error response')
@@ -685,7 +690,7 @@ class WebHandler:
                         'action': 'error',
                         'message': 'Failed to refresh sources'
                     }
-                    self.webServerDAT.send_message(client, json.dumps(error_response))
+                    self._send_response(client, error_response)
             
             elif action == 'set_lock':
                 debug('Processing set_lock action')
@@ -705,7 +710,7 @@ class WebHandler:
                             'action': 'state_update',
                             'state': state
                         }
-                        self.webServerDAT.send_message(client, json.dumps(response))
+                        self._send_response(client, response)
                         debug('Lock state updated successfully')
                     else:
                         debug('Set lock failed, sending error response')
@@ -713,14 +718,14 @@ class WebHandler:
                             'action': 'error',
                             'message': f'Failed to set lock state'
                         }
-                        self.webServerDAT.send_message(client, json.dumps(error_response))
+                        self._send_response(client, error_response)
                 else:
                     debug('Invalid set_lock parameters, sending error response')
                     error_response = {
                         'action': 'error',
                         'message': 'Invalid set_lock parameters'
                     }
-                    self.webServerDAT.send_message(client, json.dumps(error_response))
+                    self._send_response(client, error_response)
             
             elif action == 'set_lock_global':
                 debug('Processing set_lock_global action')
@@ -739,7 +744,7 @@ class WebHandler:
                             'action': 'state_update',
                             'state': state
                         }
-                        self.webServerDAT.send_message(client, json.dumps(response))
+                        self._send_response(client, response)
                         debug('Global lock state updated successfully')
                     else:
                         debug('Set global lock failed, sending error response')
@@ -747,14 +752,14 @@ class WebHandler:
                             'action': 'error',
                             'message': f'Failed to set global lock state'
                         }
-                        self.webServerDAT.send_message(client, json.dumps(error_response))
+                        self._send_response(client, error_response)
                 else:
                     debug('Invalid set_lock_global parameters, sending error response')
                     error_response = {
                         'action': 'error',
                         'message': 'Invalid set_lock_global parameters'
                     }
-                    self.webServerDAT.send_message(client, json.dumps(error_response))
+                    self._send_response(client, error_response)
             
             elif action == 'save_configuration':
                 debug('Processing save_configuration action')
@@ -770,7 +775,7 @@ class WebHandler:
                         'message': 'Configuration saved successfully'
                     }
                     debug('Sending configuration saved response')
-                    self.webServerDAT.send_message(client, json.dumps(response))
+                    self._send_response(client, response)
                     debug('Configuration saved response sent successfully')
                 else:
                     debug('Save configuration failed, sending error response')
@@ -778,7 +783,7 @@ class WebHandler:
                         'action': 'error',
                         'message': 'Failed to save configuration'
                     }
-                    self.webServerDAT.send_message(client, json.dumps(error_response))
+                    self._send_response(client, error_response)
             
             elif action == 'recall_configuration':
                 debug('Processing recall_configuration action')
@@ -794,7 +799,7 @@ class WebHandler:
                         'message': 'Configuration recalled successfully'
                     }
                     debug('Sending configuration recalled response')
-                    self.webServerDAT.send_message(client, json.dumps(response))
+                    self._send_response(client, response)
                     debug('Configuration recalled response sent successfully')
                 else:
                     debug('Recall configuration failed, sending error response')
@@ -802,14 +807,14 @@ class WebHandler:
                         'action': 'error',
                         'message': 'Failed to recall configuration'
                     }
-                    self.webServerDAT.send_message(client, json.dumps(error_response))
+                    self._send_response(client, error_response)
             
             elif action == 'ping':
                 pong_response = {
                     'action': 'pong',
                     'timestamp': time.time()
                 }
-                self.webServerDAT.send_message(client, json.dumps(pong_response))
+                self._send_response(client, pong_response)
             
             else:
                 debug(f'Unknown action received: {action}')
@@ -817,7 +822,7 @@ class WebHandler:
                     'action': 'error',
                     'message': f'Unknown action: {action}'
                 }
-                self.webServerDAT.send_message(client, json.dumps(error_response))
+                self._send_response(client, error_response)
         
         except Exception as e:
             debug(f'Exception in handleMessage: {e}')
@@ -827,7 +832,7 @@ class WebHandler:
                 'message': f'Error processing message: {str(e)}'
             }
             try:
-                self.webServerDAT.send_message(client, json.dumps(error_response))
+                self._send_response(client, error_response)
             except:
                 pass
 

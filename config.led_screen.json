@@ -28,9 +28,9 @@
   },
   
   "bridge": {
-    "enabled": false,
-    "url": null,
-    "component_id": null,
+    "enabled": true,
+    "url": "ws://localhost:8081",
+    "component_id": "rpi_led_screen",
     "component_name": "LED Screen"
   },
   
