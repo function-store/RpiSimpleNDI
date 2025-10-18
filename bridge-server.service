@@ -8,7 +8,7 @@ Type=simple
 User=catatumbo
 WorkingDirectory=/home/catatumbo/led_test
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/home/catatumbo/led_test/venv/bin/python3 bridge_server.py --no-browser
+ExecStart=/usr/bin/python3 bridge_server.py --no-browser
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal

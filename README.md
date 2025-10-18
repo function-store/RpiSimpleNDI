@@ -57,12 +57,14 @@ This repository contains tools and utilities for Raspberry Pi projects, includin
 
 - Raspberry Pi 5 (tested on Raspberry Pi OS Bookworm/Trixie)
 - Python 3.13+
-- Pygame library
+- Pygame library with SDL 2.32.4+ (for HDMI display access via KMS/DRM)
 - NDI SDK (installed at `/usr/local/lib/libndi.so.6`)
 - WebSockets library (`websockets>=10.0` for web interface)
 - FFmpeg with NDI support (optional, see [FFMPEG_NDI_BUILD.md](FFMPEG_NDI_BUILD.md))
 - HDMI display or LED screen
 - Network connectivity (for NDI and web interface)
+
+> **⚠️ Important:** Use **system Python** (`/usr/bin/python3`) rather than a virtual environment. Older SDL versions (e.g., SDL 2.28.4 in some venv installations) cannot access the display via KMS/DRM. System Python typically has the newer SDL 2.32.4+ which works correctly.
 
 ## Installation
 
@@ -488,7 +490,7 @@ RpiSimpleNDI/
 ├── led_test_pattern.py                # Legacy test patterns
 ├── ndi_receiver_native_display.py     # Legacy receiver (60 FPS)
 ├── requirements.txt                   # Python dependencies
-└── venv/                              # Virtual environment
+└── venv/                              # Virtual environment (not recommended, use system Python)
 ```
 
 ## Contributing
