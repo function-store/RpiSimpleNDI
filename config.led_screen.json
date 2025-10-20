@@ -4,6 +4,7 @@
   
   "ndi": {
     "source_pattern": ".*_led",
+    "enable_plural_handling": true,
     "scan_timeout": 2,
     "color_format": "bgra"
   },

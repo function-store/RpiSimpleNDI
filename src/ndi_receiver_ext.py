@@ -600,9 +600,19 @@ class WebHandler:
             debug('WARNING: Extension not found, cannot send initial state')
     
     def _send_response(self, client, response):
-        """Helper to safely send responses only when client exists (not bridge mode)"""
+        """Helper to safely send responses to client or bridge"""
+        # Send to direct WebSocket client (standalone mode)
         if client and self.webServerDAT:
             self.webServerDAT.send_message(client, json.dumps(response))
+        # Send to bridge server (bridge mode)
+        elif self.bridge_client and hasattr(self.bridge_client, 'broadcast_state_update'):
+            # For state_update responses, broadcast via bridge
+            if response.get('action') == 'state_update':
+                self.bridge_client.broadcast_state_update()
+                debug('State update sent to bridge')
+            # For other responses, we rely on normal broadcast mechanisms
+            else:
+                debug(f'Response action {response.get("action")} not sent to bridge (no direct response channel)')
     
     def handleMessage(self, client, message):
         """Handle incoming WebSocket messages
