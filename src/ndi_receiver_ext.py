@@ -100,10 +100,17 @@ class NDIReceiverExt:
             if self.display_handler and hasattr(self.display_handler, 'fps'):
                 fps = self.display_handler.fps
             
-            # Get resolution if available
+            # Get resolution if available - use content resolution for effective resolution
             resolution = [0, 0]
-            if self.display_handler and hasattr(self.display_handler, 'screen'):
-                if self.display_handler.screen:
+            if self.display_handler:
+                # Prefer content_resolution (effective resolution) over physical screen resolution
+                if hasattr(self.display_handler, 'content_resolution') and self.display_handler.content_resolution:
+                    resolution = [
+                        self.display_handler.content_resolution[0],
+                        self.display_handler.content_resolution[1]
+                    ]
+                # Fallback to physical screen resolution if no content resolution is specified
+                elif hasattr(self.display_handler, 'screen') and self.display_handler.screen:
                     resolution = [
                         self.display_handler.screen.get_width(),
                         self.display_handler.screen.get_height()
