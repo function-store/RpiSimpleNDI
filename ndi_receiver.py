@@ -539,8 +539,28 @@ Examples:
         last_ndi_retry = 0
         fps_report_interval = 10  # Report FPS every 10 seconds
         ndi_retry_interval = 5  # Retry NDI connection every 5 seconds
+        brightness_file = '/tmp/ndi_receiver_brightness'  # Brightness control file
+        last_brightness_check = 0
+        brightness_check_interval = 1.0  # Check brightness file every second
         
         while True:
+            # Check for brightness changes
+            now = time.time()
+            if now - last_brightness_check >= brightness_check_interval:
+                last_brightness_check = now
+                try:
+                    if os.path.exists(brightness_file):
+                        with open(brightness_file, 'r') as f:
+                            import json
+                            data = json.load(f)
+                            new_brightness = data.get('brightness', 1.0)
+                            # Clamp brightness value
+                            new_brightness = max(0.0, min(1.0, new_brightness))
+                            if abs(new_brightness - display.get_brightness()) > 0.01:  # Only update if changed
+                                display.set_brightness(new_brightness)
+                except Exception as e:
+                    logger.debug(f"Error reading brightness file: {e}")
+                    # Continue execution even if brightness check fails
             # Try to connect to NDI if not connected
             if not ndi_connected:
                 now = time.time()

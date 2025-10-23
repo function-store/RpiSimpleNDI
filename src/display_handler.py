@@ -32,6 +32,7 @@ class DisplayHandler:
         scaling: str = 'fit',
         show_fps: bool = False,
         video_driver: str = 'auto',
+        brightness: float = 1.0,
         # Legacy parameters for backwards compatibility
         resolution: Optional[Tuple[int, int]] = None,
         position: Optional[str] = None,
@@ -51,6 +52,7 @@ class DisplayHandler:
             scaling: Scaling mode ('fit', 'fill', 'none', 'stretch')
             show_fps: Show FPS counter
             video_driver: SDL video driver to use
+            brightness: Display brightness (0.0 to 1.0, default: 1.0)
             retry_interval: Seconds between reconnection attempts
             max_retries: Maximum reconnection attempts (-1 = infinite)
         """
@@ -68,6 +70,17 @@ class DisplayHandler:
         self.scaling = scaling
         self.show_fps = show_fps
         self.video_driver = video_driver
+        # Load persistent brightness setting if available
+        try:
+            persistent_brightness = self._load_persistent_brightness()
+            if persistent_brightness is not None:
+                self.brightness = persistent_brightness
+                logger.info(f"Loaded persistent brightness: {self.brightness:.2f}")
+            else:
+                self.brightness = max(0.0, min(1.0, brightness))  # Clamp brightness
+        except Exception as e:
+            logger.warning(f"Error loading persistent brightness: {e}")
+            self.brightness = max(0.0, min(1.0, brightness))  # Clamp brightness
         self.retry_interval = retry_interval
         self.max_retries = max_retries
         
@@ -297,7 +310,9 @@ class DisplayHandler:
                 # Fast path: blit directly
                 pos = self._fixed_position if self._fixed_position else ((self.screen_size[0] - width) // 2, (self.screen_size[1] - height) // 2)
                 self.screen.fill((0, 0, 0))
-                self.screen.blit(surface, pos)
+                # Apply brightness adjustment
+                adjusted_surface = self._apply_brightness(surface)
+                self.screen.blit(adjusted_surface, pos)
                 if self.show_fps:
                     self._draw_fps()
                 pygame.display.flip()
@@ -352,7 +367,9 @@ class DisplayHandler:
         
         # Clear and blit
         self.screen.fill((0, 0, 0))
-        self.screen.blit(surface, pos)
+        # Apply brightness adjustment
+        adjusted_surface = self._apply_brightness(surface)
+        self.screen.blit(adjusted_surface, pos)
         
         # Draw FPS if enabled
         if self.show_fps:
@@ -403,6 +420,67 @@ class DisplayHandler:
     def should_exit(self) -> bool:
         """Check if exit was requested"""
         return getattr(self, '_exit_requested', False)
+    
+    def set_brightness(self, brightness: float):
+        """
+        Set display brightness
+        
+        Args:
+            brightness: Brightness level (0.0 to 1.0)
+        """
+        self.brightness = max(0.0, min(1.0, brightness))  # Clamp value
+        logger.info(f"Display brightness set to {self.brightness:.2f}")
+    
+    def get_brightness(self) -> float:
+        """Get current brightness level"""
+        return self.brightness
+    
+    def _load_persistent_brightness(self) -> Optional[float]:
+        """Load brightness setting from persistent file"""
+        try:
+            persistent_file = '/home/catatumbo/led_test/.brightness'
+            if os.path.exists(persistent_file):
+                import json
+                with open(persistent_file, 'r') as f:
+                    data = json.load(f)
+                    brightness = data.get('brightness', 1.0)
+                    return max(0.0, min(1.0, brightness))  # Clamp value
+        except Exception as e:
+            logger.debug(f"Could not load persistent brightness: {e}")
+        return None
+    
+    def _apply_brightness(self, surface):
+        """
+        Apply brightness adjustment to a pygame surface
+        
+        Args:
+            surface: pygame.Surface to adjust
+            
+        Returns:
+            Adjusted pygame.Surface
+        """
+        if self.brightness >= 1.0:
+            return surface  # No adjustment needed
+        
+        # Create a copy to avoid modifying the original
+        adjusted_surface = surface.copy()
+        
+        # Use a simple but effective method: create a dark overlay
+        try:
+            # Create a semi-transparent black overlay
+            overlay = pygame.Surface(adjusted_surface.get_size(), pygame.SRCALPHA)
+            alpha_value = int(255 * (1.0 - self.brightness))
+            overlay.fill((0, 0, 0, alpha_value))
+            
+            # Blend the overlay onto the surface
+            adjusted_surface.blit(overlay, (0, 0))
+            
+            logger.debug(f"Applied brightness {self.brightness:.2f} (alpha: {alpha_value})")
+            return adjusted_surface
+            
+        except Exception as e:
+            logger.error(f"Brightness adjustment failed: {e}")
+            return surface  # Return original if method fails
     
     def cleanup(self):
         """Cleanup display resources"""

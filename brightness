@@ -1,0 +1,4 @@
+#!/bin/bash
+# Brightness control wrapper for NDI receiver
+
+python3 /home/catatumbo/led_test/set_brightness.py "$@"
