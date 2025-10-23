@@ -128,14 +128,20 @@ class NDIReceiverExt:
                 if re.search(r'[a-zA-Z0-9_]$', effective_pattern):
                     effective_pattern = effective_pattern + 's?'
             
+            # Get machine identifier
+            import socket
+            machine_id = socket.gethostname()
+            
             state = {
                 # Bridge compatibility fields
                 'component_id': self.component_id,
                 'component_name': self.component_name,
+                'machine_id': machine_id,  # Hostname for local source sharing
                 'client_type': self.client_type,
                 
                 # Core NDI fields
                 'sources': sources,
+                'local_only_sources': [],  # RPi doesn't have Spout/local-only sources
                 'output_names': [self.receiver_name],
                 'current_sources': [current_source or ''],
                 'regex_patterns': [self.ndi_handler.source_pattern or '.*'],

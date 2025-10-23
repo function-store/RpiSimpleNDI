@@ -144,6 +144,14 @@ class BridgeClientHandler:
             
             logger.debug(f"Received from bridge: {action}")
             
+            # Check if this message is for this specific component
+            # Commands from the bridge should have component_id set
+            message_component_id = data.get('component_id')
+            if message_component_id and message_component_id != self.extension.component_id:
+                # Message is for another component, ignore it
+                logger.debug(f'Ignoring message for component {message_component_id} (we are {self.extension.component_id})')
+                return
+            
             # Handle commands by delegating to webHandler
             if hasattr(self.extension, 'webHandler'):
                 # Process in main thread context (webHandler expects this)
