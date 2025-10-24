@@ -257,6 +257,18 @@ class NDIReceiverExt:
                 logger.error(f'Source not found: {source_name}')
                 return False
             
+            # Disconnect from current source first
+            if self.ndi_handler.ndi_recv:
+                logger.info(f"Disconnecting from current source: {self.ndi_handler.connected_source}")
+                try:
+                    self.ndi_handler.ndi_lib.NDIlib_recv_destroy(self.ndi_handler.ndi_recv)
+                except Exception as e:
+                    logger.warning(f"Error destroying old receiver: {e}")
+                self.ndi_handler.ndi_recv = None
+                # Small delay to ensure cleanup
+                import time
+                time.sleep(0.5)
+            
             # Connect to new source
             from src.ndi_handler import NDIlib_recv_create_v3_t
             
@@ -267,7 +279,11 @@ class NDIReceiverExt:
             recv_settings.allow_video_fields = False
             recv_settings.p_ndi_recv_name = b"NDI Receiver"
             
-            self.ndi_handler.ndi_recv = self.ndi_handler.ndi_lib.NDIlib_recv_create_v3(byref(recv_settings))
+            try:
+                self.ndi_handler.ndi_recv = self.ndi_handler.ndi_lib.NDIlib_recv_create_v3(byref(recv_settings))
+            except Exception as e:
+                logger.error(f"Failed to create NDI receiver: {e}")
+                self.ndi_handler.ndi_recv = None
             
             if self.ndi_handler.ndi_recv:
                 # Update connected source
@@ -285,6 +301,8 @@ class NDIReceiverExt:
                 return True
             else:
                 logger.error(f'Failed to connect to source: {source_name}')
+                # Reset connected_source to None since connection failed
+                self.ndi_handler.connected_source = None
                 return False
                 
         except Exception as e:

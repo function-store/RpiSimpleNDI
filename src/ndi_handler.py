@@ -387,14 +387,16 @@ class NDIHandler:
                 logger.info(f"Clearing manual override - selected source is dead")
                 self.manual_override = False
             
-            # Check if previous source is available
-            if self.previous_source and any(name == self.previous_source for name, _ in available_sources):
+            # Check if previous source is available and different from current
+            if (self.previous_source and 
+                self.previous_source != self.connected_source and 
+                any(name == self.previous_source for name, _ in available_sources)):
                 logger.info(f"Falling back to previous source: {self.previous_source}")
                 new_sources = [(name, source) for name, source in available_sources if name == self.previous_source]
                 switch_reason = "current source dead, falling back to previous"
             else:
-                # Previous not available, pick any other source
-                logger.info(f"Previous source not available, picking from available sources")
+                # Previous not available or same as current, pick any other source
+                logger.info(f"Previous source not available or same as current, picking from available sources")
                 new_sources = [(name, source) for name, source in available_sources if name != self.connected_source]
                 switch_reason = "current source not sending frames"
             should_switch = True
@@ -412,6 +414,10 @@ class NDIHandler:
                 self.manual_override = False
         
         if should_switch and new_sources:
+            # Safety check: don't switch if no different sources available
+            if len(new_sources) == 0 or (len(new_sources) == 1 and new_sources[0][0] == self.connected_source):
+                logger.warning(f"No alternative sources available, staying with current source")
+                return False
             # Pick the first new source (they're in discovery order, newest typically last)
             # But we'll take the last one to prefer the most recent
             name, source = new_sources[-1]  # Use last = most recent
