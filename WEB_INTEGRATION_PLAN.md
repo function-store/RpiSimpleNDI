@@ -1,5 +1,7 @@
 # Web Interface Integration Plan
 
+> **Historical design note.** It describes the NDI Named Router bridge from before TDXMediaServe. For the current setup see the README (TDXMediaServe Hub) and `hub_server.py`.
+
 ## Goal
 Reuse the TD_NDI_NamedRouter web interface and server for our Raspberry Pi NDI receiver with minimal changes.
 

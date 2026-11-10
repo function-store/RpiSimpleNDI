@@ -1,5 +1,7 @@
 # NDINamedRouterExt Analysis - Feature Adaptation
 
+> **Historical design note.** It describes the NDI Named Router bridge from before TDXMediaServe. For the current setup see the README (TDXMediaServe Hub) and `hub_server.py`.
+
 ## Overview
 Analysis of NDINamedRouterExt.py from TouchDesigner to identify features adaptable to our Raspberry Pi NDI receiver.
 

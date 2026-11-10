@@ -192,10 +192,10 @@ Examples:
     # Bridge options
     bridge_group = parser.add_argument_group('Bridge Options')
     bridge_group.add_argument(
-        '--bridge-url',
+        '--bridge-url', '--hub-url',
         type=str,
         default=None,
-        help='Bridge server URL for multi-component setup (e.g., ws://bridge-server:8081)'
+        help='TDXMediaServe hub URL for multi-component setup (e.g., ws://studio-pi:8081)'
     )
     bridge_group.add_argument(
         '--bridge-only',

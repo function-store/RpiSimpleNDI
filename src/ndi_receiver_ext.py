@@ -204,7 +204,25 @@ class NDIReceiverExt:
                 'error': str(e),
                 'output_sources': {self.receiver_name: ''}
             }
-    
+
+    # The fields a TDXMediaServe routing node publishes in its routing capability
+    _ROUTING_FIELDS = ('sources', 'local_only_sources', 'output_names', 'current_sources', 'regex_patterns',
+                       'effective_regex_patterns', 'plural_handling_enabled', 'output_resolutions',
+                       'lock_global', 'locks', 'last_update')
+
+    def getHubState(self):
+        """This receiver as a TDXMediaServe hub expects a node: its identity plus a routing capability."""
+        import socket
+        state = self.getCurrentState()
+        return {
+            'component_id': self.component_id,
+            'component_name': self.component_name,
+            'machine_id': state.get('machine_id') or socket.gethostname(),
+            'capabilities': {
+                'routing': {field: state[field] for field in self._ROUTING_FIELDS if field in state}
+            }
+        }
+
     def handleSetSource(self, source_name):
         """Handle source selection from web interface
         

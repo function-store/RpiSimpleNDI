@@ -18,7 +18,7 @@ This repository contains tools and utilities for Raspberry Pi projects, includin
 - **Smart fallback**: Falls back to previous source when current source dies
 - **Dead source detection**: Detects and recovers from non-responsive sources
 - **Manual override**: Web interface for remote source selection and control
-- **🔒 Lock functionality**: Lock sources to prevent automatic switching (mirroring TD_NDI_NamedRouter API)
+- **🔒 Lock functionality**: Lock sources to prevent automatic switching (mirroring the TDXMediaServe router)
 - **60 FPS performance**: Direct BGRA format for maximum throughput
 - **Flexible configuration**: JSON-based config for display, content, and NDI settings
 
@@ -31,13 +31,12 @@ This repository contains tools and utilities for Raspberry Pi projects, includin
 - **WebSocket updates**: Automatic state synchronization across all clients
 - **Mobile-friendly**: Responsive design works on phones, tablets, and desktops
 
-### 🌉 Bridge Server (Multi-Component)
-- **Centralized control**: Manage multiple TD_NDI_NamedRouter and RPi receivers from one interface
-- **Component aggregation**: Merge outputs from all connected components into unified view
-- **Auto-discovery**: Components auto-register with unique IDs and display names
-- **Command routing**: Browser commands automatically routed to correct component
-- **Flexible deployment**: Run bridge on RPi or any machine, components connect as clients
-- **Three modes**: Standalone (local only), bridge-only (no local web), or hybrid (both)
+### 🌉 TDXMediaServe Hub (Multi-Component)
+- **Centralized control**: Control TouchDesigner TDXMediaServe components and RPi receivers from one web page
+- **Runs without TouchDesigner**: `hub_server.py` keeps the page up on an always-on Pi; TouchDesigner hubs find it and connect instead of serving
+- **One port**: page, browsers (`/browser`) and nodes share port 8081, the TouchDesigner default
+- **Command routing**: Browser commands are delivered to the node they name by `component_id`
+- **Three receiver modes**: Standalone (local only), hub-only (no local web), or hybrid (both)
 
 ### 📺 Advanced Display Management
 - **Dual resolution support**: Separate display and content resolutions
@@ -134,38 +133,44 @@ The service will:
 
 **Note:** By default, the service runs without a local web interface. Configure bridge connection in your config file, or edit the service file to add `--web-server` for standalone operation.
 
-### Bridge Server Service (Optional)
+### TDXMediaServe Hub Service (Optional)
 
-To run the bridge server automatically on boot:
+To run the TDXMediaServe hub on this Pi at boot, so the web page is always up without a TouchDesigner hub:
 
 ```bash
-# Install the bridge service
-sudo cp bridge-server.service /etc/systemd/system/
+# Install the hub service
+sudo cp hub-server.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable bridge-server.service
+sudo systemctl enable hub-server.service
 
 # Start the service immediately
-sudo systemctl start bridge-server.service
+sudo systemctl start hub-server.service
 
 # Check service status
-sudo systemctl status bridge-server.service
+sudo systemctl status hub-server.service
 
 # View live logs
-sudo journalctl -u bridge-server.service -f
-
-# Stop the service
-sudo systemctl stop bridge-server.service
-
-# Disable auto-start
-sudo systemctl disable bridge-server.service
+sudo journalctl -u hub-server.service -f
 ```
 
-The bridge service will:
-- ✅ Start HTTP server on port 8000 for web interface
-- ✅ Accept browser WebSocket connections on port 8080
-- ✅ Accept component connections on port 8081
+The hub service will:
+- ✅ Serve the TDXMediaServe page at `http://<pi-ip>:8081`
+- ✅ Accept browsers (path `/browser`) and nodes (TouchDesigner components, RPi receivers) on that same port
+- ✅ Answer `/hub-id`, so TouchDesigner hubs pointed at this Pi connect to it instead of serving
 - ✅ Restart automatically if it crashes
 - ✅ Wait for network connectivity before starting
+
+**Upgrading from the old bridge server:** `bridge_server.py` and `bridge-server.service` are gone; TouchDesigner's TDXMediaServe hubs no longer work with them. On the Pi:
+
+```bash
+sudo systemctl disable --now bridge-server.service
+sudo rm /etc/systemd/system/bridge-server.service
+sudo cp hub-server.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hub-server.service
+```
+
+The page moves from `http://<pi-ip>/` (port 80) to `http://<pi-ip>:8081`.
 
 ### Service Configuration Scenarios
 
@@ -178,30 +183,33 @@ sudo systemctl enable ndi-receiver.service
 # Access at http://raspberrypi.local:8000
 ```
 
-**Scenario 2: RPi as Bridge Hub (Most Common)**
+**Scenario 2: RPi as the Hub (Studio, Most Common)**
 ```bash
-# Enable both services (no port conflict - receiver uses bridge)
-sudo systemctl enable bridge-server.service
+# Enable both services; the receiver connects to the hub on the same Pi
+sudo systemctl enable hub-server.service
 sudo systemctl enable ndi-receiver.service
 
-# Configure bridge in config.led_screen.json:
+# ndi-receiver.service already passes --bridge-url ws://localhost:8081,
+# or configure it in config.led_screen.json:
 # "bridge": {"enabled": true, "url": "ws://localhost:8081"}
 
-# Access unified interface at http://raspberrypi.local:8000
+# Access the TDXMediaServe page at http://raspberrypi.local:8081
 ```
 
-**Scenario 3: Receiver Only (Connect to External Bridge)**
+In TouchDesigner, set each TDXMediaServe component's **Network Address** (or **Url**) to the Pi's IP and **Port** to `8081`. Their status reads `Using the hub at <pi-ip>:8081`.
+
+**Scenario 3: Receiver Only (Hub in TouchDesigner)**
 ```bash
 # Only enable receiver
 sudo systemctl enable ndi-receiver.service
 
-# Configure external bridge in config.led_screen.json:
+# Point it at the TouchDesigner machine that serves:
 # "bridge": {"enabled": true, "url": "ws://TD_MACHINE_IP:8081"}
 
-# Control via TD_NDI_NamedRouter web interface
+# Control via the TDXMediaServe web page at http://TD_MACHINE_IP:8081
 ```
 
-**Port Conflict Warning:** Don't run `ndi-receiver.service` with `--web-server` AND `bridge-server.service` together without changing ports - they both use 8000 and 8080 by default!
+**Ports:** the hub uses only 8081. The receiver's own `--web-server` page uses 8000 and 8080, so the two can run together.
 
 ### Auto-Reconnection (Display & NDI)
 
@@ -312,7 +320,7 @@ python3 ndi_receiver.py --no-auto-switch
 
 ### Lock Functionality
 
-The receiver includes a **Lock feature** (mirroring the TD_NDI_NamedRouter API) to prevent automatic source switching:
+The receiver includes a **Lock feature** (mirroring the TDXMediaServe router) to prevent automatic source switching:
 
 **Lock Modes:**
 - 🔓 **Unlocked** (default): Automatic source switching is enabled based on regex patterns
@@ -350,43 +358,33 @@ python3 ndi_receiver.py --config config.led_screen.json --web-server --lock
 - Can be toggled on/off at any time via CLI or web interface
 - State is included in WebSocket updates for real-time synchronization
 
-### Bridge Server (Multi-Component Control)
+### TDXMediaServe Hub (Multi-Component Control)
 
-The bridge server allows you to control multiple NDI routing components (TouchDesigner instances, Raspberry Pi receivers) through a single unified web interface.
+The hub serves the TDXMediaServe web page and relays between every node: TouchDesigner TDXMediaServe components and Raspberry Pi receivers. TDXMediaServe components in TouchDesigner carry a hub of their own; `hub_server.py` is the same hub without TouchDesigner, for a machine that is always on.
 
-**Starting the Bridge Server:**
-
-You have two options:
-
-**Option 1: Use RPi Bridge Server (Included)**
+**Starting the Hub:**
 ```bash
-# Start on default ports (HTTP: 8000, Browser WS: 8080, Component WS: 8081)
-python3 bridge_server.py
+# One port for the page, browsers and nodes (default 8081)
+python3 hub_server.py
 
-# Don't auto-open browser
-python3 bridge_server.py --no-browser
-
-# Custom ports
-python3 bridge_server.py --port 8090 -w 9000 -t 9001
+# Another port: use the same Port on every TouchDesigner component and receiver
+python3 hub_server.py --port 8090
 ```
 
-**Option 2: Use TD_NDI_NamedRouter Bridge (External)**
-```bash
-# On your TouchDesigner/main computer, run the TD_NDI_NamedRouter bridge:
-cd /path/to/TD_NDI_NamedRouter
-python3 start_server.py
+**How TouchDesigner finds it:** a TouchDesigner hub asks its **Network Address** and **Port** for `/hub-id`. When this hub answers, the TouchDesigner hub does not serve and its component connects here (`Using the hub at <pi-ip>:8081`). A TouchDesigner hub only serves when its address names its own machine and the port is free, so with every component pointed at the Pi, the Pi is the only hub. If the Pi goes down, nothing takes over: components wait and reconnect when it is back.
 
-# Then connect your RPi receivers to it (see below)
+**The page:** the web page comes with TDXMediaServe and is not part of this repository. Copy it onto the machine that runs the hub, from a TDXMediaServe checkout or from the page file itself; it lands in `templates/hub.html` (gitignored), stamped with where it came from, and the hub logs that at start. Copy it again after updating TDXMediaServe:
+
+```bash
+python3 update_hub_page.py --from /path/to/TDXMediaServe   # a checkout
+python3 update_hub_page.py --from /path/to/index.html      # or the page file
 ```
 
-**Architecture:**
-- **Port 8000** (HTTP): Serves the web interface HTML page
-- **Port 8080** (WebSocket): Browser JavaScript connects here for real-time updates
-- **Port 8081** (WebSocket): Components (TD instances, RPi receivers) connect here as clients
-- Bridge merges all component states and displays them in a unified interface
-- Commands from browsers are routed to specific components by `component_id`
+Without the page the hub still relays, and `http://<pi-ip>:8081` says the page is missing.
 
-**Connecting RPi Receiver to Bridge:**
+The relay follows the TouchDesigner hub's rules (protocol 2); a protocol change there needs the same change in `hub_server.py`.
+
+**Connecting RPi Receiver to the Hub:**
 
 Via config file:
 ```json
@@ -394,49 +392,38 @@ Via config file:
   "name": "LED Screen",
   "bridge": {
     "enabled": true,
-    "url": "ws://bridge-server-ip:8081",
+    "url": "ws://hub-ip:8081",
     "component_id": "LED_Wall_Main",
     "component_name": "LED Wall - Stage Left"
   }
 }
 ```
 
-Via CLI:
+Via CLI (`--hub-url` and `--bridge-url` are the same option):
 ```bash
-# Connect to local RPi bridge
-python3 ndi_receiver.py --config config.json --bridge-url ws://localhost:8081
+# Hub on this Pi
+python3 ndi_receiver.py --config config.json --hub-url ws://localhost:8081
 
-# Connect to external TD_NDI_NamedRouter bridge
-python3 ndi_receiver.py --config config.json --bridge-url ws://192.168.1.100:8081
+# Hub in TouchDesigner or on another Pi
+python3 ndi_receiver.py --config config.json --hub-url ws://192.168.1.100:8081
 
-# Bridge only (no local web server) - saves resources
-python3 ndi_receiver.py --config config.json --bridge-url ws://192.168.1.100:8081 --bridge-only
+# Hub only (no local web server) - saves resources
+python3 ndi_receiver.py --config config.json --hub-url ws://192.168.1.100:8081 --bridge-only
 
-# Hybrid mode (local web server + bridge connection)
-python3 ndi_receiver.py --config config.json --web-server --bridge-url ws://192.168.1.100:8081
+# Hybrid mode (local web server + hub connection)
+python3 ndi_receiver.py --config config.json --web-server --hub-url ws://192.168.1.100:8081
 ```
 
-**Connecting TouchDesigner to Bridge:**
+The receiver publishes itself as a routing node: its `component_id`, `component_name`, `machine_id` (the hostname) and a `routing` capability with its one output. Give every Pi its own hostname or `component_id`: stock Pis are all called `raspberrypi`, and the page groups nodes by `machine_id`.
 
-In TouchDesigner NDI_NamedRouter:
-1. Set WebSocket DAT to CLIENT mode
-2. Network Address: `bridge-server-ip`
-3. Port: `8081`
-4. Active: ✓
-5. Callbacks: Point to `websocket1_callbacks`
+**Connecting TouchDesigner to the Hub:**
 
-**Features:**
-- Unified control of all outputs from one interface
-- Auto-discovery of connected components
-- Component-specific lock states
-- Real-time state synchronization
-- Source lists aggregated from all components
-- Per-component routing of commands
+On each TDXMediaServe component, set **Network Address** (or **Url**) to the hub's IP, **Port** to `8081`, and **Active** on.
 
 **Use Cases:**
 - Control multiple LED walls from one interface
 - Mix TouchDesigner and Raspberry Pi outputs
-- Centralized monitoring of all NDI routing
+- Keep the control page up on an always-on Pi while TouchDesigner machines come and go
 - Remote control from any device on network
 
 ### Legacy Applications
@@ -462,20 +449,22 @@ python3 led_test_pattern.py
 ```
 RpiSimpleNDI/
 ├── ndi_receiver.py                    # Main NDI receiver CLI ⭐
-├── bridge_server.py                   # Bridge server for multi-component control
+├── hub_server.py                      # TDXMediaServe hub without TouchDesigner
+├── update_hub_page.py                 # Refreshes the hub's copy of the TDXMediaServe page
 ├── ndi-receiver.service               # Systemd service for NDI receiver
-├── bridge-server.service              # Systemd service for bridge server
+├── hub-server.service                 # Systemd service for the hub
 ├── list_ndi_sources.py                # NDI source discovery utility
 ├── src/                               # Modular source code
 │   ├── ndi_handler.py                 # NDI management (auto-switching, regex)
 │   ├── display_handler.py             # Display/rendering
 │   ├── config.py                      # Configuration management
 │   ├── ndi_receiver_ext.py            # Web interface extension (WebSocket handling)
-│   ├── server_handler.py              # Bridge client handler
+│   ├── server_handler.py              # TDXMediaServe hub client
 │   ├── websocket_server.py            # WebSocket server
 │   └── test_patterns.py               # Test patterns
 ├── templates/                         # Web interface files
-│   └── index.html                     # Web UI (adapted from TouchDesigner)
+│   ├── index.html                     # Standalone receiver web UI
+│   └── hub.html                       # TDXMediaServe page served by hub_server.py (a copy)
 ├── config.example.json                # Example configuration
 ├── config.led_screen.json             # LED screen config
 ├── config.adaptive.json               # Adaptive display config
@@ -571,6 +560,13 @@ For issues and questions:
 - Review troubleshooting guides
 
 ## Changelog
+
+### v3.4.0 - TDXMediaServe Hub
+- 🌉 **TDXMediaServe hub**: `hub_server.py` replaces `bridge_server.py`; one port (8081) for the page, browsers and nodes, and TouchDesigner hubs connect to it through `/hub-id`
+- 📄 **Page from TDXMediaServe**: serves a local, gitignored copy of the TDXMediaServe page, made with `update_hub_page.py`
+- 🔗 **Protocol 2 client**: the receiver publishes a `routing` capability, opts out of other nodes' state, ignores everything but commands, and names itself in `source_changed`
+- ⚙️ **Systemd service**: `hub-server.service` replaces `bridge-server.service`
+- 🏷️ **CLI**: `--hub-url` is an alias of `--bridge-url`
 
 ### v3.3.0 - Bridge Server (Multi-Component Control)
 - 🌉 **Bridge server**: Run centralized server to control multiple components (TD + RPi)

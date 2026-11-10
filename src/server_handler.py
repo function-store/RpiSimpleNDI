@@ -1,16 +1,15 @@
 """
-Bridge Client Handler - WebSocket client for connecting to bridge server
+Hub Client Handler - WebSocket client for a TDXMediaServe hub
 
-This module handles connection to the NDI Named Router bridge server,
-allowing the Raspberry Pi receiver to be controlled alongside TouchDesigner
-instances through a unified web interface.
+Connects the Raspberry Pi receiver to a TDXMediaServe hub (the one inside a
+TouchDesigner component, or hub_server.py) as a routing node, so it is
+controlled alongside TouchDesigner outputs from the TDXMediaServe web page.
 
-Protocol:
-- Connects to bridge server as WebSocket client
-- Sends initial state on connection
-- Sends state updates when sources/locks change
-- Receives commands from bridge (routed from web browsers)
-- Executes commands locally (set_source, set_lock, etc.)
+Protocol (TDXMediaServe protocol 2):
+- Registers so the hub does not send it every other node's state
+- Publishes its identity plus a routing capability on connect and on change
+- Receives the commands the hub delivers to its component_id, or to every node
+- Executes them locally (set_source, set_lock, etc.) and ignores everything else
 """
 
 import asyncio
@@ -22,6 +21,10 @@ import time
 from typing import Optional
 
 logger = logging.getLogger('ndi_receiver.bridge_client')
+
+# Commands this receiver carries out; the hub's other messages (other nodes' state, events) are ignored
+_COMMANDS = ('request_state', 'set_source', 'refresh_sources', 'set_lock', 'set_lock_global',
+             'save_configuration', 'recall_configuration', 'ping')
 
 
 class BridgeClientHandler:
@@ -122,13 +125,19 @@ class BridgeClientHandler:
                 logger.error("No extension available")
                 return
             
-            state = self.extension.getCurrentState()
+            # Without this the hub sends this node the whole fleet's state on every change.
+            # A hub only stops for client_type info, which does not stop it accepting our state or commands.
+            await self.websocket.send(json.dumps({
+                'action': 'register_client',
+                'client_type': 'info',
+                'auto_update': False
+            }))
             message = {
                 'action': 'state_update',
-                'state': state
+                'state': self.extension.getHubState()
             }
             await self.websocket.send(json.dumps(message))
-            logger.info("Sent initial state to bridge")
+            logger.info("Sent initial state to hub")
         except Exception as e:
             logger.error(f"Failed to send initial state: {e}")
     
@@ -143,6 +152,9 @@ class BridgeClientHandler:
             action = data.get('action')
             
             logger.debug(f"Received from bridge: {action}")
+            
+            if action not in _COMMANDS:
+                return
             
             # Check if this message is for this specific component
             # Commands from the bridge should have component_id set
@@ -170,10 +182,9 @@ class BridgeClientHandler:
             return
         
         try:
-            state = self.extension.getCurrentState()
             message = json.dumps({
                 'action': 'state_update',
-                'state': state
+                'state': self.extension.getHubState()
             })
             
             # Schedule send in event loop
@@ -198,6 +209,7 @@ class BridgeClientHandler:
         try:
             message = json.dumps({
                 'action': 'source_changed',
+                'component_id': self.extension.component_id,
                 'block_idx': block_idx,
                 'source_name': source_name
             })

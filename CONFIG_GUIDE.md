@@ -92,30 +92,30 @@ This separation allows you to:
 - Rotates the content before positioning
 - For 90° or 270°, width and height are swapped
 
-### Bridge Configuration (TD_NDI_NamedRouter Integration)
+### Hub Configuration (TDXMediaServe Integration)
 
 ```json
 "bridge": {
-  "enabled": false,              // Enable bridge client mode
-  "url": null,                   // Bridge server URL (e.g., ws://bridge-server:8081)
-  "component_id": null,          // Unique ID for bridge mode
+  "enabled": false,              // Connect to a TDXMediaServe hub
+  "url": null,                   // Hub URL (e.g., ws://studio-pi:8081)
+  "component_id": null,          // Unique ID on the hub
                                  // null = auto-generated from hostname
-  "component_name": "LED Wall"   // Human-readable name for bridge display
+  "component_name": "LED Wall"   // Human-readable name on the web page
                                  // null = uses "name" field
 }
 ```
 
-**Bridge Mode:**
-When connecting to a TD_NDI_NamedRouter bridge server, this Raspberry Pi receiver will appear in the unified web interface alongside TouchDesigner instances and other RPi receivers.
+**Hub Mode:**
+When connected to a TDXMediaServe hub (inside a TouchDesigner TDXMediaServe component, or `hub_server.py` on a Pi), this Raspberry Pi receiver appears on the TDXMediaServe web page alongside TouchDesigner outputs and other RPi receivers, grouped by its hostname. The section keeps the name `bridge` so existing configs keep working.
 
 **Fields:**
-- `enabled`: Set to `true` to enable bridge mode (can be overridden with `--bridge-url` CLI arg)
-- `url`: WebSocket URL of the bridge server component port (default: 8081)
-- `component_id`: Unique identifier for this component
+- `enabled`: Set to `true` to connect to the hub (can be overridden with the `--hub-url` / `--bridge-url` CLI arg)
+- `url`: WebSocket URL of the hub's one port (default: 8081)
+- `component_id`: Unique identifier for this component. Stock Pis share the hostname `raspberrypi`, so set this (or a unique hostname) on each one
 - `component_name`: Human-readable display name
 
 **Configuration Priority:**
-1. CLI arguments (`--bridge-url`, `--component-id`, `--component-name`)
+1. CLI arguments (`--hub-url` / `--bridge-url`, `--component-id`, `--component-name`)
 2. Config file (`bridge` section)
 3. Auto-generated defaults
 
@@ -123,7 +123,7 @@ When connecting to a TD_NDI_NamedRouter bridge server, this Raspberry Pi receive
 - `component_id`: Auto-generated as `"RaspberryPi_<hostname>"`
 - `component_name`: Uses the `"name"` field from config
 
-**Example (Multi-RPi Setup with Bridge):**
+**Example (Multi-RPi Setup with a Hub):**
 ```json
 {
   "name": "LED Screen",
@@ -136,12 +136,12 @@ When connecting to a TD_NDI_NamedRouter bridge server, this Raspberry Pi receive
 }
 ```
 
-This connects to the bridge at `192.168.1.100:8081` and appears in the interface as "LED Wall - Stage Left" with ID "LED_Wall_Main".
+This connects to the hub at `192.168.1.100:8081` and appears in the interface as "LED Wall - Stage Left" with ID "LED_Wall_Main".
 
 **Modes:**
 - **Standalone**: `--web-server` (local web interface only)
-- **Bridge only**: `--bridge-url ws://server:8081 --bridge-only` (no local web server)
-- **Hybrid**: `--web-server --bridge-url ws://server:8081` (both local and bridge)
+- **Hub only**: `--hub-url ws://server:8081 --bridge-only` (no local web server)
+- **Hybrid**: `--web-server --hub-url ws://server:8081` (both local and hub)
 
 ## Example Configurations
 
