@@ -62,6 +62,8 @@ class NodeRelay:
         self._send = send
         self.clients: dict = {}
         self.nodes: dict = {}
+        # Last state of each node that disconnected, by hub key, until a node with that key returns
+        self.departed: dict = {}
 
     def onOpen(self, client: object, path: str) -> None:
         role = 'browser' if path.startswith(BROWSER_PATH) else 'node'
@@ -74,7 +76,8 @@ class NodeRelay:
     def onClose(self, client: object) -> None:
         record = self.clients.pop(client, None)
         if record and record['key'] in self.nodes:
-            del self.nodes[record['key']]
+            # A node also leaves when its COMP stops cooking: keep what it last showed
+            self.departed[record['key']] = {**self.nodes.pop(record['key']), 'departed_at': time.time()}
             self._sendToBrowsers(self.mergedStateMessage())
 
     def onText(self, client: object, text: str) -> None:
@@ -117,7 +120,9 @@ class NodeRelay:
             return
         if action == 'state_update' and message.get('state', {}).get('component_id'):
             state = message['state']
-            self.nodes[self._assignNodeKey(client, record, state['component_id'])] = nodeStateFrom(state)
+            key = self._assignNodeKey(client, record, state['component_id'])
+            self.nodes[key] = nodeStateFrom(state)
+            self.departed.pop(key, None)
             text = self.mergedStateMessage()
         elif componentId:
             # Browsers address nodes by hub key, which may differ from the node's own id
@@ -164,10 +169,12 @@ class NodeRelay:
                 self._send(client, text)
 
     def mergedStateMessage(self) -> str:
-        """Every connected node under its hub key; readers interpret the capabilities they understand."""
-        nodes = [{**state, 'component_id': key, 'component_name': state.get('component_name', key), 'machine_id': state.get('machine_id', 'unknown')}
-            for key, state in self.nodes.items()]
-        return json.dumps({'action': 'state_update', 'state': {'protocol': PROTOCOL_VERSION, 'last_update': time.time(), 'nodes': nodes}})
+        """Every connected node under its hub key, and in departed the last state of nodes that left; readers interpret the capabilities they understand."""
+        def listed(key: str, state: dict) -> dict:
+            return {**state, 'component_id': key, 'component_name': state.get('component_name', key), 'machine_id': state.get('machine_id', 'unknown')}
+        nodes = [listed(key, state) for key, state in self.nodes.items()]
+        departed = [listed(key, state) for key, state in self.departed.items()]
+        return json.dumps({'action': 'state_update', 'state': {'protocol': PROTOCOL_VERSION, 'last_update': time.time(), 'nodes': nodes, 'departed': departed}})
 
 
 def lanAddress() -> str:
