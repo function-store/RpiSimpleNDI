@@ -20,7 +20,7 @@
     "resolution": "320x320",
     "position": "0,0",
     "rotation": 180,
-    "scaling": "none"
+    "scaling": "fit"
   },
   
   "performance": {

@@ -71,7 +71,7 @@ This separation allows you to:
                              // null = center
   "rotation": 180,           // Rotation in degrees (0, 90, 180, 270)
                              // null = 0
-  "scaling": "none"          // Scaling mode (see below)
+  "scaling": "fit"           // Scaling mode (see below)
 }
 ```
 
@@ -82,11 +82,11 @@ This separation allows you to:
 - `"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"` - Named positions
 - `null` - Auto-center
 
-**Scaling Modes:**
-- `"none"` - No scaling, use content resolution as-is
-- `"fit"` - Scale to fit display, maintain aspect ratio (default)
-- `"fill"` - Scale to fill display, may crop
-- `"stretch"` - Stretch to fill display exactly
+**Scaling Modes:** with `resolution` set, the content resolution is a box on the screen and every source is scaled into it, whatever size it arrives at; without it, the box is the whole display.
+- `"fit"` - Whole frame, aspect ratio kept, centred with black bars (default)
+- `"fill"` - Box covered, aspect ratio kept, centre cropped
+- `"stretch"` - Box covered exactly, aspect ratio ignored
+- `"none"` - Native size from the box corner, clipped to the box
 
 **Rotation:**
 - Rotates the content before positioning

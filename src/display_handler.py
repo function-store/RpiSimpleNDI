@@ -330,11 +330,24 @@ class DisplayHandler:
         
         # Handle content resolution and scaling
         if self.content_resolution:
-            # Scale to specified content resolution
-            target_size = self.content_resolution
-            if self.scaling != 'none':
-                surface = pygame.transform.scale(surface, target_size)
-            width, height = target_size
+            # The content resolution is a fixed box on the screen; the scaling mode places any source inside it
+            surface, inner_offset = self._place_in_box(surface, width, height, self.content_resolution)
+            box_w, box_h = self.content_resolution
+            if self.content_position is not None:
+                box_pos = self.content_position
+            elif self.content_position_name and self.content_position_name in self.POSITIONS:
+                box_pos = self.POSITIONS[self.content_position_name](box_w, box_h, self.screen_size[0], self.screen_size[1])
+            else:
+                box_pos = ((self.screen_size[0] - box_w) // 2, (self.screen_size[1] - box_h) // 2)
+            pos = (box_pos[0] + inner_offset[0], box_pos[1] + inner_offset[1])
+            self.screen.fill((0, 0, 0))
+            self.screen.blit(self._apply_brightness(surface), pos)
+            if self.show_fps:
+                self._draw_fps()
+            pygame.display.flip()
+            self._update_fps_counter()
+            self._process_events()
+            return
         elif self.scaling == 'fit':
             # Scale to fit display while maintaining aspect ratio
             scale = min(self.screen_size[0] / width, self.screen_size[1] / height)
@@ -384,6 +397,31 @@ class DisplayHandler:
         # Process events
         self._process_events()
     
+    def _place_in_box(self, surface, width: int, height: int, box: Tuple[int, int]):
+        """Scale a frame into the content box by the scaling mode; returns (surface, offset inside the box)
+
+        fit: whole frame, aspect kept, centred, black bars; fill: box covered, aspect kept, centre cropped;
+        stretch: box covered, aspect ignored; none: native size from the box corner, clipped to the box.
+        """
+        box_w, box_h = box
+        if (width, height) == (box_w, box_h) or self.scaling == 'none':
+            if width > box_w or height > box_h:
+                surface = surface.subsurface((0, 0, min(width, box_w), min(height, box_h)))
+            return surface, (0, 0)
+        if self.scaling == 'stretch':
+            return pygame.transform.scale(surface, box), (0, 0)
+        if self.scaling == 'fill':
+            scale = max(box_w / width, box_h / height)
+            scaled_w, scaled_h = max(box_w, round(width * scale)), max(box_h, round(height * scale))
+            surface = pygame.transform.scale(surface, (scaled_w, scaled_h))
+            crop_x, crop_y = (scaled_w - box_w) // 2, (scaled_h - box_h) // 2
+            return surface.subsurface((crop_x, crop_y, box_w, box_h)), (0, 0)
+        # fit (the default, and any unknown mode)
+        scale = min(box_w / width, box_h / height)
+        scaled_w, scaled_h = max(1, min(box_w, round(width * scale))), max(1, min(box_h, round(height * scale)))
+        surface = pygame.transform.scale(surface, (scaled_w, scaled_h))
+        return surface, ((box_w - scaled_w) // 2, (box_h - scaled_h) // 2)
+
     def _update_fps_counter(self):
         """Update FPS counter (separated for optimization)"""
         self.frame_count += 1
