@@ -9,6 +9,7 @@ import logging
 from typing import Optional, List, Tuple
 import numpy as np
 import re
+import threading
 
 logger = logging.getLogger('ndi_receiver.ndi')
 
@@ -86,10 +87,15 @@ class NDIHandler:
         self.manual_override = False  # Set to True when user manually selects a source
         self.locked = False  # When True, prevents automatic source switching
         self.video_frame = NDIlib_video_frame_v2_t()
+        # Guards ndi_recv: the main loop captures on it while the hub thread may
+        # destroy and recreate it (NDIReceiverExt.handleSetSource)
+        self.recv_lock = threading.RLock()
         self.last_source_check = 0
         self.source_check_interval = 2.0  # Check for new sources every 2 seconds
         self.last_frame_time = 0
+        self.last_connect_time = 0  # When the current receiver was created
         self.no_frame_timeout = 5.0  # Consider source dead after 5 seconds without frames
+        self.dead_recheck_interval = 1.0  # Re-check a dead source at most once per second
         self.previous_available_sources = set()  # Track what was available in last check
         
         # Compile regex pattern
@@ -268,6 +274,7 @@ class NDIHandler:
             return False
         
         self.connected_source = target_source.p_ndi_name.decode('utf-8')
+        self.mark_receiver_created()
         logger.info(f"Connected to: {self.connected_source}")
         return True
     
@@ -290,22 +297,26 @@ class NDIHandler:
         # New or reappearing sources that match the pattern can still override
         # But if the manual source is alive, we'll check for new/reappearing sources below
         
-        import time
         now = time.time()
-        
-        # Check if we're connected but not receiving frames (dead source)
+
+        # Check if we're connected but not receiving frames (dead source).
+        # Measure from the later of the last frame and the receiver's creation,
+        # so a receiver that was just created gets the full no_frame_timeout to
+        # deliver its first frame instead of inheriting the old source's silence.
         is_source_dead = False
+        time_since_last_frame = 0.0
         if self.ndi_recv and self.last_frame_time > 0:
-            time_since_last_frame = now - self.last_frame_time
-            if time_since_last_frame > self.no_frame_timeout:
-                logger.warning(f"No frames received for {time_since_last_frame:.1f}s - source may be dead")
-                is_source_dead = True
-        
-        # Only check periodically (but always check if source is dead)
-        if not is_source_dead and (now - self.last_source_check < self.source_check_interval):
+            time_since_last_frame = now - max(self.last_frame_time, self.last_connect_time)
+            is_source_dead = time_since_last_frame > self.no_frame_timeout
+
+        # Check periodically; a dead source is re-checked sooner, but never every loop
+        interval = self.dead_recheck_interval if is_source_dead else self.source_check_interval
+        if now - self.last_source_check < interval:
             return False
-        
+
         self.last_source_check = now
+        if is_source_dead:
+            logger.warning(f"No frames received for {time_since_last_frame:.1f}s - source may be dead")
         
         # Get current sources
         num_sources = c_uint32(0)
@@ -443,6 +454,7 @@ class NDIHandler:
                 # Track the previous source before switching
                 self.previous_source = self.connected_source
                 self.connected_source = name
+                self.mark_receiver_created()
                 logger.info(f"✓ Connected to: {name}")
                 return True
             else:
@@ -460,6 +472,11 @@ class NDIHandler:
         Returns:
             Tuple of (frame_data, resolution, fps) or None if no frame
         """
+        with self.recv_lock:
+            return self._receive_frame_locked(timeout_ms)
+
+    def _receive_frame_locked(self, timeout_ms: int):
+        """receive_frame body; caller holds recv_lock"""
         if not self.ndi_recv:
             return None
         
@@ -476,7 +493,6 @@ class NDIHandler:
         
         if frame_type == 1:  # Video frame
             # Update last frame time
-            import time
             self.last_frame_time = time.time()
             
             width = self.video_frame.xres
@@ -496,16 +512,12 @@ class NDIHandler:
             
             return (frame_data, (width, height), fps)
         
-        # No frame received - if we've been getting frames but now stopped, force a check
-        import time
-        if self.last_frame_time > 0:
-            time_since_last = time.time() - self.last_frame_time
-            if time_since_last > 2.0:  # Been 2+ seconds without frames
-                # Force immediate source check
-                self.last_source_check = 0
-        
         return None
-    
+
+    def mark_receiver_created(self):
+        """Start the no-frame grace period for a receiver that was just (re)created"""
+        self.last_connect_time = time.time()
+
     def get_source_name(self) -> Optional[str]:
         """Get the name of the connected source"""
         return self.connected_source

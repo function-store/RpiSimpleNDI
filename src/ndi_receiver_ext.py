@@ -234,6 +234,14 @@ class NDIReceiverExt:
             
         Adapted from NDINamedRouterExt.handleSetSource()
         """
+        # Called from the hub/websocket thread: hold the receiver lock so the main
+        # loop is never inside NDIlib_recv_capture_v2 on the receiver destroyed here
+        # (that use-after-free segfaulted the process on manual switches)
+        with self.ndi_handler.recv_lock:
+            return self._setSource(source_name)
+
+    def _setSource(self, source_name):
+        """Switch the receiver to source_name; caller holds ndi_handler.recv_lock"""
         try:
             debug(f'Set source request: {source_name}')
             logger.info(f'Web interface requesting source change to: {source_name}')
@@ -307,7 +315,8 @@ class NDIReceiverExt:
                 # Update connected source
                 old_source = self.ndi_handler.connected_source
                 self.ndi_handler.connected_source = source_name
-                
+                self.ndi_handler.mark_receiver_created()
+
                 # Set manual override flag to prevent auto-switching away from this source
                 self.ndi_handler.manual_override = True
                 logger.info(f'✓ Switched from "{old_source}" to "{source_name}" via web interface (manual override enabled)')

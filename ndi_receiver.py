@@ -7,6 +7,7 @@ A modular CLI application for receiving NDI video streams
 import argparse
 import sys
 import logging
+import logging.handlers
 import time
 import signal
 from pathlib import Path
@@ -20,7 +21,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('ndi_receiver.log')
+        # Capped at 4 x 10 MB; an unbounded file grew to 21 GB on the studio Pi
+        logging.handlers.RotatingFileHandler('ndi_receiver.log', maxBytes=10 * 1024 * 1024, backupCount=3)
     ]
 )
 logger = logging.getLogger('ndi_receiver')
@@ -536,6 +538,7 @@ Examples:
         frame_count = 0
         start_time = time.time()
         last_fps_report = start_time
+        frames_at_last_report = 0
         last_ndi_retry = 0
         fps_report_interval = 10  # Report FPS every 10 seconds
         ndi_retry_interval = 5  # Retry NDI connection every 5 seconds
@@ -601,11 +604,13 @@ Examples:
                 # Report FPS every 10 seconds
                 now = time.time()
                 if now - last_fps_report >= fps_report_interval:
-                    elapsed = now - start_time
-                    avg_fps = frame_count / elapsed if elapsed > 0 else 0
+                    # Rate over the last interval; a lifetime average hides
+                    # current throughput behind any earlier time without frames
+                    interval_fps = (frame_count - frames_at_last_report) / (now - last_fps_report)
                     _, (width, height), source_fps = frame
-                    logger.info(f"FPS Report: {avg_fps:.1f} fps (source: {source_fps:.1f} fps) | Frames: {frame_count} | Resolution: {width}x{height}")
+                    logger.info(f"FPS Report: {interval_fps:.1f} fps (source: {source_fps:.1f} fps) | Frames: {frame_count} | Resolution: {width}x{height}")
                     last_fps_report = now
+                    frames_at_last_report = frame_count
                 
                 # Check for exit
                 if display.should_exit():
