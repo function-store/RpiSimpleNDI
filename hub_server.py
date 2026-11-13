@@ -38,6 +38,8 @@ except ImportError:
     _IS_NEW_API = False
 
 PROTOCOL_VERSION = 2
+# Node events only a page shows: other nodes never get them (receivers answer an unknown action with an error)
+BROWSER_ONLY_ACTIONS = ('preview',)
 BROWSER_PATH = '/browser'
 HUB_ID_PATH = '/hub-id'
 IDENTITY_FIELDS = ('component_id', 'component_name', 'machine_id')
@@ -129,6 +131,8 @@ class NodeRelay:
             message['component_id'] = record['key']
             text = json.dumps(message)
         self._sendToBrowsers(text)
+        if action in BROWSER_ONLY_ACTIONS:
+            return
         for other, otherRecord in self.clients.items():
             if other != client and otherRecord['role'] == 'node' and otherRecord['wantsUpdates']:
                 self._send(other, text)
