@@ -44,6 +44,8 @@ BROWSER_ONLY_ACTIONS = ('preview',)
 # Wrong passwords a browser may try before the hub closes its connection
 MAX_PASSWORD_TRIES = 5
 PASSWORD_ENV = 'TDXMS_HUB_PASSWORD'
+# What this hub understands beyond protocol 2; nodes read it from /hub-id before relying on it
+HUB_FEATURES = ('clock',)
 BROWSER_PATH = '/browser'
 HUB_ID_PATH = '/hub-id'
 IDENTITY_FIELDS = ('component_id', 'component_name', 'machine_id')
@@ -147,6 +149,10 @@ class NodeRelay:
 
     def _handleNodeMessage(self, client: object, record: dict, text: str, message: dict) -> None:
         action = message.get('action')
+        if action == 'clock':
+            # Answered here and never passed on: the node works out its offset to this hub's clock from the round trip
+            self._send(client, json.dumps({'action': 'clock', 't0': message.get('t0'), 'hub': time.time()}))
+            return
         if action == 'register_client':
             record['wantsUpdates'] = message.get('client_type', 'controller') != 'info' or message.get('auto_update', True)
             return
@@ -262,7 +268,7 @@ class HubServer:
                 return HTTPStatus.INTERNAL_SERVER_ERROR, 'text/plain; charset=utf-8', b'The hub page is missing. Run update_hub_page.py.'
             return HTTPStatus.OK, 'text/html; charset=utf-8', page
         if route == HUB_ID_PATH:
-            return HTTPStatus.OK, 'application/json', json.dumps({'hub': self.hubId}).encode()
+            return HTTPStatus.OK, 'application/json', json.dumps({'hub': self.hubId, 'features': list(HUB_FEATURES)}).encode()
         if route == '/favicon.ico':
             return HTTPStatus.NO_CONTENT, 'text/plain', b''
         return HTTPStatus.NOT_FOUND, 'text/plain; charset=utf-8', b'Not Found'
