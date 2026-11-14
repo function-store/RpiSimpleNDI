@@ -100,9 +100,14 @@ Examples:
         help='Disable automatic switching to new sources with matching suffix'
     )
     ndi_group.add_argument(
+        '--auto-route',
+        action='store_true',
+        help='Start with Auto Route on: a matching source that appears takes the screen over (same as "auto_route": true in the config)'
+    )
+    ndi_group.add_argument(
         '--lock',
         action='store_true',
-        help='Start with source locked (prevents automatic source switching)'
+        help='Start with Auto Route off, overriding --auto-route and the config (the default since Auto Route replaced Lock)'
     )
     
     # Web server options
@@ -392,7 +397,8 @@ Examples:
             case_sensitive=ndi_config.get('case_sensitive', False),
             scan_timeout=args.scan_timeout,
             color_format=args.color_format,
-            auto_switch=not args.no_auto_switch
+            auto_switch=not args.no_auto_switch,
+            auto_route=(args.auto_route or bool(ndi_config.get('auto_route', False))) and not args.lock
         )
         
         # Apply lock flag if specified

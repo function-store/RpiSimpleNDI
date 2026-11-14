@@ -56,7 +56,8 @@ class NDIHandler:
         case_sensitive: bool = False,
         scan_timeout: int = 2,
         color_format: str = 'bgra',
-        auto_switch: bool = True
+        auto_switch: bool = True,
+        auto_route: bool = False
     ):
         """
         Initialize NDI handler
@@ -69,6 +70,9 @@ class NDIHandler:
             scan_timeout: Seconds to wait for source discovery
             color_format: Color format ('bgra', 'uyvy', 'rgba')
             auto_switch: Automatically switch to new sources with matching pattern
+            auto_route: Start with Auto Route on: a matching source that appears takes over, and
+                another replaces a source that goes. Off (default) keeps the source it has; a
+                receiver with no source yet still takes the first matching one.
         """
         self.source_name = source_name
         self.source_pattern = source_pattern
@@ -85,7 +89,7 @@ class NDIHandler:
         self.connected_source = None
         self.previous_source = None  # Track the source we were on before current
         self.manual_override = False  # Set to True when user manually selects a source
-        self.locked = False  # When True, prevents automatic source switching
+        self.locked = not auto_route  # When True (Auto Route off), keeps the source it has
         self.video_frame = NDIlib_video_frame_v2_t()
         # Guards ndi_recv: the main loop captures on it while the hub thread may
         # destroy and recreate it (NDIReceiverExt.handleSetSource)
@@ -288,9 +292,9 @@ class NDIHandler:
         if not self.auto_switch or not self.ndi_find:
             return False
         
-        # If locked, prevent all automatic source switching
-        if self.locked:
-            logger.debug("Source is locked - skipping auto-switching")
+        # Auto Route off keeps the source it has; one with no source yet still takes the first match
+        if self.locked and self.connected_source:
+            logger.debug("Auto Route off - keeping the current source")
             return False
         
         # Manual override only prevents switching to existing sources

@@ -18,7 +18,7 @@ This repository contains tools and utilities for Raspberry Pi projects, includin
 - **Smart fallback**: Falls back to previous source when current source dies
 - **Dead source detection**: Detects and recovers from non-responsive sources
 - **Manual override**: Web interface for remote source selection and control
-- **🔒 Lock functionality**: Lock sources to prevent automatic switching (mirroring the TDXMediaServe router)
+- **Auto Route**: off by default (the receiver keeps its source); on, a matching source takes the screen over (mirroring the TDXMediaServe router)
 - **60 FPS performance**: Direct BGRA format for maximum throughput
 - **Flexible configuration**: JSON-based config for display, content, and NDI settings
 
@@ -26,7 +26,7 @@ This repository contains tools and utilities for Raspberry Pi projects, includin
 - **Remote control**: Select NDI sources from any device on the network
 - **Real-time monitoring**: Live FPS, resolution, and connection status
 - **Source management**: View available sources and switch between them instantly
-- **🔒 Lock button**: Toggle lock state to prevent/allow automatic source switching
+- **AUTO button**: turn Auto Route on or off for the screen
 - **Smart override logic**: Manual selection respects new/reappearing sources
 - **WebSocket updates**: Automatic state synchronization across all clients
 - **Mobile-friendly**: Responsive design works on phones, tablets, and desktops
@@ -318,45 +318,32 @@ The receiver automatically manages NDI source connections:
 python3 ndi_receiver.py --no-auto-switch
 ```
 
-### Lock Functionality
+### Auto Route
 
-The receiver includes a **Lock feature** (mirroring the TDXMediaServe router) to prevent automatic source switching:
+**Auto Route** (it replaced Lock, its opposite, mirroring the TDXMediaServe router) decides whether a matching source may take the screen over:
 
-**Lock Modes:**
-- 🔓 **Unlocked** (default): Automatic source switching is enabled based on regex patterns
-- 🔒 **Locked**: Automatic source switching is disabled - current source remains fixed
+- **Off** (default): the receiver keeps the source it has. A new matching source, or the current one going away, does not switch it. A receiver with no source yet (booted before any sender) still takes the first source matching its pattern, so a headless display never stays black.
+- **On**: a source matching the pattern takes the screen over when it appears, and another matching source replaces the current one when it goes or stops sending frames.
 
-**How to Lock:**
+Picking a source on the web page works either way.
 
-**Via CLI:**
+**Starting with Auto Route on:**
+
 ```bash
-# Start with lock enabled
-python3 ndi_receiver.py --lock
-
-# Combine with config and web server
-python3 ndi_receiver.py --config config.led_screen.json --web-server --lock
+python3 ndi_receiver.py --auto-route
 ```
 
-**Via Web Interface:**
-- Click the 🔓/🔒 button next to the output name
-- 🔓 = Unlocked (auto-switching enabled)
-- 🔒 = Locked (auto-switching disabled)
-- Visual indicator: Locked outputs show 🔒 in title and orange border
+or in the config:
 
-**When to Use Lock:**
-- ✅ **Production shows**: Lock to prevent unexpected source changes during performance
-- ✅ **Testing specific sources**: Lock while debugging a particular NDI source
-- ✅ **Manual control**: When you want complete control over source selection
-- ✅ **Stable setups**: Lock after finding the right source to prevent auto-switching
+```json
+"ndi": { "source_pattern": ".*_led", "auto_route": true }
+```
 
-**Lock Behavior:**
-- When locked, the receiver will NOT automatically switch sources even if:
-  - New matching sources appear on the network
-  - Current source disappears and reappears
-  - Regex patterns would normally trigger a switch
-- Manual source selection via web interface still works when locked
-- Can be toggled on/off at any time via CLI or web interface
-- State is included in WebSocket updates for real-time synchronization
+`--lock` still starts with Auto Route off and overrides both.
+
+**On the web page:** the **AUTO** button next to the output name is lit while Auto Route is on.
+
+The hub protocol still speaks of locks (`locks`, `set_lock`, `locked`): locked means Auto Route off. That keeps receivers and routers of every version talking to each other.
 
 ### TDXMediaServe Hub (Multi-Component Control)
 

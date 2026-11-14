@@ -495,7 +495,7 @@ class NDIReceiverExt:
                 self.handleSetSource(saved_source)
             
             # Apply saved lock state
-            saved_locked = config_data.get('locked', False)
+            saved_locked = config_data.get('locked', self.ndi_handler.is_locked())
             logger.info(f'Recalling saved lock state: {saved_locked}')
             self.ndi_handler.set_locked(saved_locked)
             

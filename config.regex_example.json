@@ -7,7 +7,8 @@
     "case_sensitive": false,
     "scan_timeout": 2,
     "color_format": "bgra",
-    "auto_switch": true
+    "auto_switch": true,
+    "auto_route": false
   },
   "display": {
     "resolution": [800, 800],
