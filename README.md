@@ -18,7 +18,7 @@ This repository contains tools and utilities for Raspberry Pi projects, includin
 - **Smart fallback**: Falls back to previous source when current source dies
 - **Dead source detection**: Detects and recovers from non-responsive sources
 - **Manual override**: Web interface for remote source selection and control
-- **Auto Route**: off by default (the receiver keeps its source); on, a matching source takes the screen over (mirroring the TDXMediaServe router)
+- **Auto Route**: on by default (a matching source takes the screen over); off, the receiver keeps its source (mirroring the TDXMediaServe router)
 - **60 FPS performance**: Direct BGRA format for maximum throughput
 - **Flexible configuration**: JSON-based config for display, content, and NDI settings
 
@@ -322,24 +322,24 @@ python3 ndi_receiver.py --no-auto-switch
 
 **Auto Route** (it replaced Lock, its opposite, mirroring the TDXMediaServe router) decides whether a matching source may take the screen over:
 
-- **Off** (default): the receiver keeps the source it has. A new matching source, or the current one going away, does not switch it. A receiver with no source yet (booted before any sender) still takes the first source matching its pattern, so a headless display never stays black.
-- **On**: a source matching the pattern takes the screen over when it appears, and another matching source replaces the current one when it goes or stops sending frames.
+- **Off**: the receiver keeps the source it has. A new matching source, or the current one going away, does not switch it. A receiver with no source yet (booted before any sender) still takes the first source matching its pattern, so a headless display never stays black.
+- **On** (default): a source matching the pattern takes the screen over when it appears, and another matching source replaces the current one when it goes or stops sending frames.
 
 Picking a source on the web page works either way.
 
-**Starting with Auto Route on:**
+**Starting with Auto Route off:**
 
 ```bash
-python3 ndi_receiver.py --auto-route
+python3 ndi_receiver.py --lock
 ```
 
 or in the config:
 
 ```json
-"ndi": { "source_pattern": ".*_led", "auto_route": true }
+"ndi": { "source_pattern": ".*_led", "auto_route": false }
 ```
 
-`--lock` still starts with Auto Route off and overrides both.
+`--auto-route` turns it back on over a config that sets it off; `--lock` overrides both.
 
 **On the web page:** the **AUTO** button next to the output name is lit while Auto Route is on.
 

@@ -57,7 +57,7 @@ class NDIHandler:
         scan_timeout: int = 2,
         color_format: str = 'bgra',
         auto_switch: bool = True,
-        auto_route: bool = False
+        auto_route: bool = True
     ):
         """
         Initialize NDI handler
@@ -71,7 +71,7 @@ class NDIHandler:
             color_format: Color format ('bgra', 'uyvy', 'rgba')
             auto_switch: Automatically switch to new sources with matching pattern
             auto_route: Start with Auto Route on: a matching source that appears takes over, and
-                another replaces a source that goes. Off (default) keeps the source it has; a
+                another replaces a source that goes (default). Off keeps the source it has; a
                 receiver with no source yet still takes the first matching one.
         """
         self.source_name = source_name

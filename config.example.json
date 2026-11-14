@@ -7,7 +7,7 @@
     "scan_timeout": 2,
     "color_format": "bgra",
     "auto_switch": true,
-    "auto_route": false,
+    "auto_route": true,
     "_comment": "Regex pattern examples:",
     "_examples": {
       "any_led": ".*_led",

@@ -102,12 +102,12 @@ Examples:
     ndi_group.add_argument(
         '--auto-route',
         action='store_true',
-        help='Start with Auto Route on: a matching source that appears takes the screen over (same as "auto_route": true in the config)'
+        help='Start with Auto Route on even when the config sets "auto_route": false (on is the default)'
     )
     ndi_group.add_argument(
         '--lock',
         action='store_true',
-        help='Start with Auto Route off, overriding --auto-route and the config (the default since Auto Route replaced Lock)'
+        help='Start with Auto Route off (the receiver keeps its source), overriding --auto-route and the config'
     )
     
     # Web server options
@@ -398,7 +398,7 @@ Examples:
             scan_timeout=args.scan_timeout,
             color_format=args.color_format,
             auto_switch=not args.no_auto_switch,
-            auto_route=(args.auto_route or bool(ndi_config.get('auto_route', False))) and not args.lock
+            auto_route=(args.auto_route or bool(ndi_config.get('auto_route', True))) and not args.lock
         )
         
         # Apply lock flag if specified
