@@ -16,6 +16,7 @@ copy it into templates/hub.html with update_hub_page.py.
 
 import argparse
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -40,6 +41,9 @@ except ImportError:
 PROTOCOL_VERSION = 2
 # Node events only a page shows: other nodes never get them (receivers answer an unknown action with an error)
 BROWSER_ONLY_ACTIONS = ('preview',)
+# Wrong passwords a browser may try before the hub closes its connection
+MAX_PASSWORD_TRIES = 5
+PASSWORD_ENV = 'TDXMS_HUB_PASSWORD'
 BROWSER_PATH = '/browser'
 HUB_ID_PATH = '/hub-id'
 IDENTITY_FIELDS = ('component_id', 'component_name', 'machine_id')
@@ -60,8 +64,11 @@ def nodeStateFrom(state: dict) -> dict:
 class NodeRelay:
     """Relays messages between browsers and nodes. Pure logic: the server owns the sockets and passes `send` in."""
 
-    def __init__(self, send: Callable[[object, str], None]) -> None:
+    def __init__(self, send: Callable[[object, str], None], close: Optional[Callable[[object], None]] = None, password: str = '') -> None:
         self._send = send
+        self._close = close or (lambda client: None)
+        # Browsers must give it in a hello before they see or change anything; empty: the page is open
+        self.password = password
         self.clients: dict = {}
         self.nodes: dict = {}
         # Last state of each node that disconnected, by hub key, until a node with that key returns
@@ -70,10 +77,33 @@ class NodeRelay:
     def onOpen(self, client: object, path: str) -> None:
         role = 'browser' if path.startswith(BROWSER_PATH) else 'node'
         self.clients[client] = {'role': role, 'key': None, 'wantsUpdates': True}
-        if role == 'browser':
-            for node in self._nodeClients():
-                self._send(node, json.dumps({'action': 'request_state'}))
-            self._send(client, self.mergedStateMessage())
+        if role != 'browser':
+            return
+        if self.password:
+            # Nothing is shown or accepted until the page says the password in a hello
+            self.clients[client].update(isAuthorized=False, tries=0)
+            self._send(client, json.dumps({'action': 'auth_required'}))
+        else:
+            self.clients[client]['isAuthorized'] = True
+            self._welcomeBrowser(client)
+
+    def _welcomeBrowser(self, client: object) -> None:
+        for node in self._nodeClients():
+            self._send(node, json.dumps({'action': 'request_state'}))
+        self._send(client, self.mergedStateMessage())
+
+    def _checkPassword(self, client: object, record: dict, message: dict) -> None:
+        """Let a browser in on the right password; close it after too many wrong ones."""
+        if not self.password or hmac.compare_digest(str(message.get('password', '')).encode(), self.password.encode()):
+            record['isAuthorized'] = True
+            self._send(client, json.dumps({'action': 'auth_ok'}))
+            self._welcomeBrowser(client)
+            return
+        record['tries'] = record.get('tries', 0) + 1
+        self._send(client, json.dumps({'action': 'auth_failed', 'message': 'Wrong password'}))
+        if record['tries'] >= MAX_PASSWORD_TRIES:
+            logger.info(f'Closed a browser after {record["tries"]} wrong passwords')
+            self._close(client)
 
     def onClose(self, client: object) -> None:
         record = self.clients.pop(client, None)
@@ -96,6 +126,14 @@ class NodeRelay:
             self._handleNodeMessage(client, record, text, message)
 
     def _handleBrowserMessage(self, client: object, text: str, message: dict) -> None:
+        record = self.clients[client]
+        if message.get('action') == 'hello':
+            if not record.get('isAuthorized', True):
+                self._checkPassword(client, record, message)
+            return
+        if not record.get('isAuthorized', True):
+            self._send(client, json.dumps({'action': 'auth_required'}))
+            return
         if message.get('action') == 'error':
             return
         if message.get('component_id'):
@@ -169,7 +207,7 @@ class NodeRelay:
 
     def _sendToBrowsers(self, text: str) -> None:
         for client, record in self.clients.items():
-            if record['role'] == 'browser':
+            if record['role'] == 'browser' and record.get('isAuthorized', True):
                 self._send(client, text)
 
     def mergedStateMessage(self) -> str:
@@ -200,10 +238,10 @@ def pageSource(text: str) -> str:
 class HubServer:
     """Owns the sockets: serves the page and /hub-id over HTTP and feeds WebSocket traffic to the relay."""
 
-    def __init__(self, pagePath: str) -> None:
+    def __init__(self, pagePath: str, password: str = '') -> None:
         self.pagePath = pagePath
         self.hubId = f'python:{socket.gethostname()}:{os.getpid()}'
-        self.relay = NodeRelay(self._enqueue)
+        self.relay = NodeRelay(self._enqueue, self._closeClient, password)
         self._outboxes: dict = {}
 
     def _readPage(self) -> Optional[bytes]:
@@ -234,10 +272,19 @@ class HubServer:
         if outbox is not None:
             outbox.put_nowait(text)
 
+    def _closeClient(self, client: object) -> None:
+        # Called from the relay inside the event loop; the close runs after the messages already queued
+        outbox = self._outboxes.get(client)
+        if outbox is not None:
+            outbox.put_nowait(None)
+
     async def _drain(self, client, outbox: asyncio.Queue) -> None:
         """Send one client's messages in order; a slow client never holds up the others."""
         while True:
             text = await outbox.get()
+            if text is None:
+                await client.close()
+                return
             try:
                 await client.send(text)
             except Exception as e:
@@ -268,8 +315,8 @@ def isWebSocketRequest(headers) -> bool:
     return 'websocket' in headers.get('Upgrade', '').lower()
 
 
-async def runHub(host: str, port: int, pagePath: str) -> None:
-    hub = HubServer(pagePath)
+async def runHub(host: str, port: int, pagePath: str, password: str = '') -> None:
+    hub = HubServer(pagePath, password)
 
     if _IS_NEW_API:
         async def handler(connection):
@@ -294,7 +341,8 @@ async def runHub(host: str, port: int, pagePath: str) -> None:
     page = hub._readPage()
     source = pageSource(page.decode('utf-8', 'replace')) if page else 'missing'
     async with _serve(handler, host, port, process_request=processRequest):
-        logger.info(f'TDXMediaServe hub serving at http://{lanAddress()}:{port} (page: {source}, protocol {PROTOCOL_VERSION})')
+        access = 'password set' if password else 'no password, open to anyone on the network'
+        logger.info(f'TDXMediaServe hub serving at http://{lanAddress()}:{port} (page: {source}, protocol {PROTOCOL_VERSION}, {access})')
         logger.info(f'Point TouchDesigner components and Raspberry Pi receivers at {lanAddress()}:{port}')
         await asyncio.Future()
 
@@ -305,13 +353,14 @@ def main() -> None:
     parser.add_argument('--host', default='0.0.0.0', help='Address to listen on (default: all interfaces)')
     parser.add_argument('--page', default=DEFAULT_PAGE, help='The page to serve (default: templates/hub.html)')
     parser.add_argument('--debug', action='store_true', help='Log every connection detail')
+    parser.add_argument('--password', default=os.environ.get(PASSWORD_ENV, ''), help=f'A password the web page asks for before it shows or changes anything (default: the {PASSWORD_ENV} environment variable, which keeps it out of the process list; empty: open). Only browsers need it.')
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     # websockets logs every open and close itself; the hub logs connections with their role
     logging.getLogger('websockets').setLevel(logging.DEBUG if args.debug else logging.WARNING)
     try:
-        asyncio.run(runHub(args.host, args.port, args.page))
+        asyncio.run(runHub(args.host, args.port, args.page, args.password))
     except OSError as e:
         logger.error(f'Cannot serve on port {args.port}: {e}. Is another hub or program using it?')
         sys.exit(1)
