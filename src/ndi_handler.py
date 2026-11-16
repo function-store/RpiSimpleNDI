@@ -199,11 +199,26 @@ class NDIHandler:
         self.ndi_lib.NDIlib_recv_destroy.argtypes = [c_void_p]
         self.ndi_lib.NDIlib_find_destroy.argtypes = [c_void_p]
     
+    def _ensure_finder(self) -> None:
+        """Create the NDI finder once and keep it: it follows sources coming and going by itself.
+
+        Only a new finder needs scan_timeout to hear the network. Creating one per scan, as before,
+        never destroyed the previous one: each kept a D-Bus connection to Avahi and a thread, so a
+        receiver retrying with no source online spent the user's D-Bus connection limit (256) and
+        then found no sources at all.
+        """
+        if self.ndi_find:
+            return
+        self.ndi_find = self.ndi_lib.NDIlib_find_create_v2(None)
+        if not self.ndi_find:
+            raise RuntimeError("Failed to create NDI finder")
+        logger.info(f"Scanning for NDI sources (timeout: {self.scan_timeout}s)...")
+        time.sleep(self.scan_timeout)
+
     def list_sources(self) -> List[str]:
         """List all available NDI sources"""
-        self.ndi_find = self.ndi_lib.NDIlib_find_create_v2(None)
-        time.sleep(self.scan_timeout)
-        
+        self._ensure_finder()
+
         num_sources = c_uint32(0)
         sources = self.ndi_lib.NDIlib_find_get_current_sources(self.ndi_find, byref(num_sources))
         
@@ -222,11 +237,8 @@ class NDIHandler:
         Returns:
             True if connected successfully
         """
-        # Create finder
-        self.ndi_find = self.ndi_lib.NDIlib_find_create_v2(None)
-        logger.info(f"Scanning for NDI sources (timeout: {self.scan_timeout}s)...")
-        time.sleep(self.scan_timeout)
-        
+        self._ensure_finder()
+
         # Get sources
         num_sources = c_uint32(0)
         sources = self.ndi_lib.NDIlib_find_get_current_sources(self.ndi_find, byref(num_sources))
