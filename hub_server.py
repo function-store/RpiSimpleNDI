@@ -40,12 +40,12 @@ except ImportError:
 
 PROTOCOL_VERSION = 2
 # Node events only a page shows: other nodes never get them (receivers answer an unknown action with an error)
-BROWSER_ONLY_ACTIONS = ('preview',)
+BROWSER_ONLY_ACTIONS = ('preview', 'parameter_values')
 # Wrong passwords a browser may try before the hub closes its connection
 MAX_PASSWORD_TRIES = 5
 PASSWORD_ENV = 'TDXMS_HUB_PASSWORD'
 # What this hub understands beyond protocol 2; nodes read it from /hub-id before relying on it
-HUB_FEATURES = ('clock',)
+HUB_FEATURES = ('clock', 'parameter_values')
 BROWSER_PATH = '/browser'
 HUB_ID_PATH = '/hub-id'
 IDENTITY_FIELDS = ('component_id', 'component_name', 'machine_id')
@@ -170,6 +170,13 @@ class NodeRelay:
             self.nodes[key] = nodeStateFrom(state)
             self.departed.pop(key, None)
             text = self.mergedStateMessage()
+        elif action == 'parameter_values':
+            # Changed values of a Parameters node: kept in its state for pages that connect later, sent to pages only
+            parameters = self.nodes.get(record['key'], {}).get('capabilities', {}).get('parameters')
+            if parameters is not None and isinstance(message.get('values'), dict):
+                parameters.setdefault('values', {}).update(message['values'])
+            message['component_id'] = record['key']
+            text = json.dumps(message)
         elif componentId:
             # Browsers address nodes by hub key, which may differ from the node's own id
             message['component_id'] = record['key']

@@ -157,6 +157,7 @@ The hub service will:
 - ✅ Serve the TDXMediaServe page at `http://<pi-ip>:8081`
 - ✅ Accept browsers (path `/browser`) and nodes (TouchDesigner components, RPi receivers) on that same port
 - ✅ Answer `/hub-id`, so TouchDesigner hubs pointed at this Pi connect to it instead of serving
+- ✅ Keep a node's `parameter_values` (changed parameter values) in its state and pass them to pages only, as the TouchDesigner hub does
 - ✅ Restart automatically if it crashes
 - ✅ Wait for network connectivity before starting
 
