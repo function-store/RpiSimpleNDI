@@ -83,9 +83,9 @@ Examples:
     )
     ndi_group.add_argument(
         '--scan-timeout',
-        type=int,
-        default=2,
-        help='Seconds to wait for NDI source discovery (default: 2)'
+        type=float,
+        default=None,
+        help='Seconds to wait for NDI source discovery (default: ndi.scan_timeout in the config, else 2)'
     )
     ndi_group.add_argument(
         '--color-format',
@@ -267,7 +267,7 @@ Examples:
         source_pattern = f'.*{args.source_suffix}' if args.source_suffix else '.*_led'
         ndi = NDIHandler(
             source_pattern=source_pattern,
-            scan_timeout=args.scan_timeout
+            scan_timeout=args.scan_timeout if args.scan_timeout is not None else 2
         )
         sources = ndi.list_sources()
         
@@ -395,11 +395,17 @@ Examples:
             source_pattern=source_pattern,
             enable_plural_handling=ndi_config.get('enable_plural_handling', False),
             case_sensitive=ndi_config.get('case_sensitive', False),
-            scan_timeout=args.scan_timeout,
+            # The command line wins over the config; timings in seconds
+            scan_timeout=args.scan_timeout if args.scan_timeout is not None else ndi_config.get('scan_timeout', 2),
             color_format=args.color_format,
             auto_switch=not args.no_auto_switch,
-            auto_route=(args.auto_route or bool(ndi_config.get('auto_route', True))) and not args.lock
+            auto_route=(args.auto_route or bool(ndi_config.get('auto_route', True))) and not args.lock,
+            source_check_interval=float(ndi_config.get('source_check_interval', 2.0)),
+            no_frame_timeout=float(ndi_config.get('no_frame_timeout', 5.0)),
+            source_switch_delay=float(ndi_config.get('source_switch_delay', 0.5))
         )
+        logger.info(f"NDI timings: discovery {ndi.scan_timeout}s, source check every {ndi.source_check_interval}s, "
+                    f"dead after {ndi.no_frame_timeout}s without frames, switch delay {ndi.source_switch_delay}s")
         
         # Apply lock flag if specified
         if args.lock:

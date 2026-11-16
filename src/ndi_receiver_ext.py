@@ -293,7 +293,7 @@ class NDIReceiverExt:
                 self.ndi_handler.ndi_recv = None
                 # Small delay to ensure cleanup
                 import time
-                time.sleep(0.5)
+                time.sleep(self.ndi_handler.source_switch_delay)
             
             # Connect to new source
             from src.ndi_handler import NDIlib_recv_create_v3_t

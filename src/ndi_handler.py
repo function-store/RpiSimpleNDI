@@ -57,7 +57,10 @@ class NDIHandler:
         scan_timeout: int = 2,
         color_format: str = 'bgra',
         auto_switch: bool = True,
-        auto_route: bool = True
+        auto_route: bool = True,
+        source_check_interval: float = 2.0,
+        no_frame_timeout: float = 5.0,
+        source_switch_delay: float = 0.5
     ):
         """
         Initialize NDI handler
@@ -73,6 +76,10 @@ class NDIHandler:
             auto_route: Start with Auto Route on: a matching source that appears takes over, and
                 another replaces a source that goes (default). Off keeps the source it has; a
                 receiver with no source yet still takes the first matching one.
+            source_check_interval: Seconds between checks for new or returning matching sources
+            no_frame_timeout: Seconds without frames before the current source counts as dead
+            source_switch_delay: Seconds to wait after closing a receiver before opening the
+                next one when a source is picked from the page
         """
         self.source_name = source_name
         self.source_pattern = source_pattern
@@ -95,10 +102,11 @@ class NDIHandler:
         # destroy and recreate it (NDIReceiverExt.handleSetSource)
         self.recv_lock = threading.RLock()
         self.last_source_check = 0
-        self.source_check_interval = 2.0  # Check for new sources every 2 seconds
+        self.source_check_interval = source_check_interval
         self.last_frame_time = 0
         self.last_connect_time = 0  # When the current receiver was created
-        self.no_frame_timeout = 5.0  # Consider source dead after 5 seconds without frames
+        self.no_frame_timeout = no_frame_timeout
+        self.source_switch_delay = source_switch_delay
         self.dead_recheck_interval = 1.0  # Re-check a dead source at most once per second
         self.previous_available_sources = set()  # Track what was available in last check
         

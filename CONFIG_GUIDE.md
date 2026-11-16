@@ -39,10 +39,15 @@ This separation allows you to:
 ```json
 "ndi": {
   "source_suffix": "_led",    // Auto-detect sources ending with this
-  "scan_timeout": 2,           // Seconds to wait for discovery
-  "color_format": "bgra"       // Format: bgra (fastest), uyvy, rgba
+  "scan_timeout": 2,           // Seconds to wait for discovery at start (--scan-timeout overrides it)
+  "color_format": "bgra",      // Format: bgra (fastest), uyvy, rgba
+  "source_check_interval": 2,  // Seconds between checks for new or returning matching sources
+  "no_frame_timeout": 5,       // Seconds without frames before the source counts as dead
+  "source_switch_delay": 0.5   // Seconds between closing one receiver and opening the next on a pick from the page
 }
 ```
+
+Raise the three timings on a busy network or a slow sender, for fewer source checks and less eager switching away from a source that stutters.
 
 ### Display Configuration
 

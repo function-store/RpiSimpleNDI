@@ -44,3 +44,6 @@ cache/
 
 # TDXMediaServe page copied by update_hub_page.py; it comes from TDXMediaServe and is never committed here
 templates/hub.html
+
+# Brightness set_brightness.py remembers on this machine
+.brightness
