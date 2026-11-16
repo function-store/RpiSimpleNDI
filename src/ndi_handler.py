@@ -265,14 +265,12 @@ class NDIHandler:
                 logger.info(f"Found source matching pattern '{self.source_pattern}': {name}")
                 break
         
-        # Fallback to first source
-        if not target_source and num_sources.value > 0:
-            target_source = sources[0]
-            name = target_source.p_ndi_name.decode('utf-8') if target_source.p_ndi_name else ""
-            logger.warning(f"No source with suffix '{self.source_suffix}' found, using first: {name}")
-        
+        # Wait for a source that matches: the screen never takes whatever sender happens to be online
         if not target_source:
-            logger.error("No NDI sources available")
+            if num_sources.value > 0:
+                logger.info(f"No source matches '{self.source_pattern}' yet; waiting")
+            else:
+                logger.error("No NDI sources available")
             return False
         
         # Create receiver
