@@ -12,6 +12,11 @@ every TouchDesigner component's Network Address (or Url) and Port at this machin
 The relay follows the TouchDesigner hub's rules (protocol 2); a protocol change
 there needs the same change here. The page is not part of this repository:
 copy it into templates/hub.html with update_hub_page.py.
+
+It can also hand out TouchDesigner components from the page: any .tox in the
+downloads folder is offered there. This hub cannot change a .tox, so either the
+files were made for this hub's address (a TouchDesigner hub writes them with
+their downloads.json), or the page tells the visitor which address to type in.
 """
 
 import argparse
@@ -49,7 +54,12 @@ HUB_FEATURES = ('clock', 'parameter_values')
 BROWSER_PATH = '/browser'
 HUB_ID_PATH = '/hub-id'
 IDENTITY_FIELDS = ('component_id', 'component_name', 'machine_id')
+DOWNLOADS_PATH = '/downloads'
+DOWNLOAD_PATH = '/download/'
+# Written beside the files by the TouchDesigner hub that made them: the address they connect to, and what each one is
+DOWNLOADS_LIST = 'downloads.json'
 DEFAULT_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates', 'hub.html')
+DEFAULT_DOWNLOADS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads')
 
 logger = logging.getLogger('tdxms_hub')
 
@@ -249,10 +259,12 @@ def pageSource(text: str) -> str:
 
 
 class HubServer:
-    """Owns the sockets: serves the page and /hub-id over HTTP and feeds WebSocket traffic to the relay."""
+    """Owns the sockets: serves the page, /hub-id and the downloads over HTTP and feeds WebSocket traffic to the relay."""
 
-    def __init__(self, pagePath: str, password: str = '') -> None:
+    def __init__(self, pagePath: str, password: str = '', port: int = 8081, downloadsPath: str = DEFAULT_DOWNLOADS) -> None:
         self.pagePath = pagePath
+        self.port = port
+        self.downloadsPath = downloadsPath
         self.hubId = f'python:{socket.gethostname()}:{os.getpid()}'
         self.relay = NodeRelay(self._enqueue, self._closeClient, password)
         self._outboxes: dict = {}
@@ -266,8 +278,45 @@ class HubServer:
             logger.error(f'Cannot read the page {self.pagePath}: {e}')
             return None
 
-    def httpResponse(self, path: str) -> tuple:
-        """(status, content type, body) for a plain HTTP request."""
+    def downloads(self, host: str = '') -> dict:
+        """The components in the downloads folder and the address they connect to; read on every request.
+
+        With a downloads.json the files were made for that address. Without one they are as released, and the
+        visitor is told to set the address the page was opened at (host, the request's Host header).
+        """
+        listed = {}
+        try:
+            with open(os.path.join(self.downloadsPath, DOWNLOADS_LIST), encoding='utf-8') as file:
+                listed = json.load(file)
+        except (OSError, ValueError):
+            pass
+        try:
+            present = sorted(name for name in os.listdir(self.downloadsPath) if name.lower().endswith('.tox'))
+        except OSError:
+            present = []
+        known = [entry for entry in listed.get('files', []) if isinstance(entry, dict) and entry.get('file') in present]
+        named = {entry['file'] for entry in known}
+        files = known + [{'file': name, 'label': name[:-4].replace('TDXMS_', ''), 'summary': ''} for name in present if name not in named]
+        if listed.get('address'):
+            return {'address': listed['address'], 'port': listed.get('port', self.port), 'files': files}
+        name = re.sub(r':\d+$', '', host).strip('[]')
+        if not re.fullmatch(r'[A-Za-z0-9.:-]+', name) or name in ('localhost', '127.0.0.1', '::1'):
+            name = lanAddress()
+        return {'address': name, 'port': self.port, 'configured': False, 'files': files}
+
+    def _readDownload(self, name: str) -> Optional[bytes]:
+        # Only a file the list offers, so a path in the name reaches nothing else
+        if name not in {entry['file'] for entry in self.downloads()['files']}:
+            return None
+        try:
+            with open(os.path.join(self.downloadsPath, name), 'rb') as file:
+                return file.read()
+        except OSError as e:
+            logger.error(f'Cannot read the download {name}: {e}')
+            return None
+
+    def httpResponse(self, path: str, host: str = '') -> tuple:
+        """(status, content type, body), and for a download a fourth item with its extra headers, for a plain HTTP request."""
         route = path.split('?', 1)[0]
         if route in ('/', '/index.html'):
             page = self._readPage()
@@ -276,6 +325,13 @@ class HubServer:
             return HTTPStatus.OK, 'text/html; charset=utf-8', page
         if route == HUB_ID_PATH:
             return HTTPStatus.OK, 'application/json', json.dumps({'hub': self.hubId, 'features': list(HUB_FEATURES)}).encode()
+        if route == DOWNLOADS_PATH:
+            return HTTPStatus.OK, 'application/json', json.dumps(self.downloads(host)).encode()
+        if route.startswith(DOWNLOAD_PATH):
+            name = route[len(DOWNLOAD_PATH):]
+            body = self._readDownload(name)
+            if body is not None:
+                return HTTPStatus.OK, 'application/octet-stream', body, [('Content-Disposition', f'attachment; filename="{name}"')]
         if route == '/favicon.ico':
             return HTTPStatus.NO_CONTENT, 'text/plain', b''
         return HTTPStatus.NOT_FOUND, 'text/plain; charset=utf-8', b'Not Found'
@@ -328,8 +384,14 @@ def isWebSocketRequest(headers) -> bool:
     return 'websocket' in headers.get('Upgrade', '').lower()
 
 
-async def runHub(host: str, port: int, pagePath: str, password: str = '') -> None:
-    hub = HubServer(pagePath, password)
+def httpHeaders(answer: tuple) -> list:
+    """The headers for an httpResponse answer."""
+    _status, contentType, body, *extra = answer
+    return [('Content-Type', contentType), ('Content-Length', str(len(body)))] + (extra[0] if extra else [])
+
+
+async def runHub(host: str, port: int, pagePath: str, password: str = '', downloadsPath: str = DEFAULT_DOWNLOADS) -> None:
+    hub = HubServer(pagePath, password, port, downloadsPath)
 
     if _IS_NEW_API:
         async def handler(connection):
@@ -338,9 +400,8 @@ async def runHub(host: str, port: int, pagePath: str, password: str = '') -> Non
         def processRequest(connection, request):
             if isWebSocketRequest(request.headers):
                 return None
-            status, contentType, body = hub.httpResponse(request.path)
-            headers = Headers([('Content-Type', contentType), ('Content-Length', str(len(body)))])
-            return Response(status.value, status.phrase, headers, body)
+            answer = hub.httpResponse(request.path, request.headers.get('Host', ''))
+            return Response(answer[0].value, answer[0].phrase, Headers(httpHeaders(answer)), answer[2])
     else:
         async def handler(websocket, path=None):
             await hub.handleConnection(websocket, path if path is not None else websocket.path)
@@ -348,8 +409,8 @@ async def runHub(host: str, port: int, pagePath: str, password: str = '') -> Non
         async def processRequest(path, requestHeaders):
             if isWebSocketRequest(requestHeaders):
                 return None
-            status, contentType, body = hub.httpResponse(path)
-            return status, [('Content-Type', contentType), ('Content-Length', str(len(body)))], body
+            answer = hub.httpResponse(path, requestHeaders.get('Host', ''))
+            return answer[0], httpHeaders(answer), answer[2]
 
     page = hub._readPage()
     source = pageSource(page.decode('utf-8', 'replace')) if page else 'missing'
@@ -365,6 +426,7 @@ def main() -> None:
     parser.add_argument('--port', type=int, default=8081, help='The one port for the page, browsers and nodes (default: 8081, the TouchDesigner default)')
     parser.add_argument('--host', default='0.0.0.0', help='Address to listen on (default: all interfaces)')
     parser.add_argument('--page', default=DEFAULT_PAGE, help='The page to serve (default: templates/hub.html)')
+    parser.add_argument('--downloads', default=DEFAULT_DOWNLOADS, help='Folder of TouchDesigner components (.tox) the page offers for download (default: downloads)')
     parser.add_argument('--debug', action='store_true', help='Log every connection detail')
     parser.add_argument('--password', default=os.environ.get(PASSWORD_ENV, ''), help=f'A password the web page asks for before it shows or changes anything (default: the {PASSWORD_ENV} environment variable, which keeps it out of the process list; empty: open). Only browsers need it.')
     args = parser.parse_args()
@@ -373,7 +435,7 @@ def main() -> None:
     # websockets logs every open and close itself; the hub logs connections with their role
     logging.getLogger('websockets').setLevel(logging.DEBUG if args.debug else logging.WARNING)
     try:
-        asyncio.run(runHub(args.host, args.port, args.page, args.password))
+        asyncio.run(runHub(args.host, args.port, args.page, args.password, args.downloads))
     except OSError as e:
         logger.error(f'Cannot serve on port {args.port}: {e}. Is another hub or program using it?')
         sys.exit(1)

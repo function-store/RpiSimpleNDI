@@ -348,7 +348,7 @@ The hub protocol still speaks of locks (`locks`, `set_lock`, `locked`): locked m
 
 ### TDXMediaServe Hub (Multi-Component Control)
 
-The hub serves the TDXMediaServe web page and relays between every node: TouchDesigner TDXMediaServe components and Raspberry Pi receivers. TDXMediaServe components in TouchDesigner carry a hub of their own; `hub_server.py` is the same hub without TouchDesigner, for a machine that is always on.
+The hub serves the TDXMediaServe web page and relays between every node: TouchDesigner TDXMediaServe components and Raspberry Pi receivers. In TouchDesigner the hub is the `TDXMS_Hub` component; `hub_server.py` is the same hub without TouchDesigner, for a machine that is always on.
 
 **Starting the Hub:**
 ```bash
@@ -369,6 +369,11 @@ python3 update_hub_page.py --from /path/to/index.html      # or the page file
 ```
 
 Without the page the hub still relays, and `http://<pi-ip>:8081` says the page is missing.
+
+**Components for download:** every `.tox` in the `downloads` folder (gitignored; `--downloads` names another) is offered at the foot of the page, to save or to drag out of the browser. This hub cannot change a `.tox`, so there are two ways to fill the folder:
+
+- **Made for this hub:** in TouchDesigner, `op.TDXMSHub.ExportDownloads(folder, '<pi-hostname>.local', 8081)` writes Info and Parameters already set to connect to that address, with a `downloads.json` that says so. Copy the folder's contents here. Use the hostname, not the IP, so the files stay right when the Pi's IP changes.
+- **As released:** copy any released `.tox` in. With no `downloads.json`, the page tells the visitor which **Url** and **Port** to set after placing the component.
 
 The relay follows the TouchDesigner hub's rules (protocol 2); a protocol change there needs the same change in `hub_server.py`.
 
